@@ -393,9 +393,10 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_processes", type=int, default=1)
-    parser.add_argument("--n_envs", type=int, default=50)
+    parser.add_argument("--n_envs", type=int, default=1)
     parser.add_argument("--n_steps", type=int, default=4)
     parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--lambd", type=float, default=0.95)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--critic_lr", type=float, default=1e-3)
@@ -484,6 +485,7 @@ def training(args, model, trainer_id, device):
     env_count = args.n_envs
     n_steps = args.n_steps
     gamma = args.gamma
+    lambd = args.lambd
     batch_size = args.batch_size
     atari = args.atari
     epoch_length = args.epoch_length
@@ -503,6 +505,7 @@ def training(args, model, trainer_id, device):
     _, _, limits = get_action_space_details(eval_env.action_space)
     writer = SummaryWriter(comment=f"-{run_id}") if args.tensorboardlog else DummySummaryWriter()
 
+    # TODO
     dataset = EnvironmentsDataset(environments, model, n_steps, gamma, batch_size, preprocessor, device,
                                   epoch_length=epoch_length, partial_unroll=partial_unroll, action_limits=limits)
 
