@@ -397,6 +397,7 @@ def main():
     parser.add_argument("--n_steps", type=int, default=4)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--lambd", type=float, default=0.95)
+    parser.add_argument("--n_ppo_rounds", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--critic_lr", type=float, default=1e-3)
@@ -423,8 +424,6 @@ def main():
     parser.add_argument("--run_id", default=None)
     parser.add_argument("--model_id", default=None)
     parser.add_argument("--log_frequency", type=int, default=1)
-    parser.add_argument("--partial_unroll", dest="partial_unroll", action="store_true")
-    parser.add_argument("--no_partial_unroll", dest="partial_unroll", action="store_false")
     parser.add_argument("--undiscounted_log", dest="undiscounted_log", action="store_true")
     parser.add_argument("--no_undiscounted_log", dest="undiscounted_log", action="store_false")
     parser.add_argument("--atari", dest="atari", action="store_true")
@@ -490,9 +489,11 @@ def training(args, model, trainer_id, device):
     atari = args.atari
     epoch_length = args.epoch_length
     target_mean_returns = args.target_mean_returns
-    partial_unroll = args.partial_unroll
     checkpoint_path = args.checkpoint_path
     num_epochs = args.n_epochs if args.n_epochs > 0 else None
+
+    num_ppo_rounds = args.n_ppo_rounds if args.n_ppo_rounds > 1 else 1
+
     num_mean_results = args.n_mean_results
     run_id = args.run_id if args.run_id is not None else f"run_{datetime.now():%d%m%Y_%H%M%S}"
     run_id = f"{run_id}_{trainer_id}"
@@ -506,8 +507,8 @@ def training(args, model, trainer_id, device):
     writer = SummaryWriter(comment=f"-{run_id}") if args.tensorboardlog else DummySummaryWriter()
 
     # TODO
-    dataset = EnvironmentsDataset(environments, model, n_steps, gamma, batch_size, preprocessor, device,
-                                  epoch_length=epoch_length, partial_unroll=partial_unroll, action_limits=limits)
+    dataset = EnvironmentsDataset(environments, model, n_steps, gamma, lambd, num_ppo_rounds, batch_size, preprocessor,
+                                  device, epoch_length=epoch_length, action_limits=limits)
 
     graceful_exiter = GracefulExit() if args.graceful_exit else None
     trainer = ActorCriticTrainer(args, model, model_id, trainer_id=trainer_id, writer=writer,

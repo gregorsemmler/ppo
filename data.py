@@ -62,14 +62,16 @@ class EpisodesBuffer(object):
         self.rewards = []
         self.dones = []
         self.values = []
+        self.log_probs = []
         self.infos = []
 
-    def append(self, action, reward, state, done, value, info=None):
+    def append(self, action, reward, state, done, value, log_prob, info=None):
         self.actions.append(action)
         self.states.append(state)
         self.rewards.append(reward)
         self.dones.append(done)
         self.values.append(value)
+        self.log_probs.append(log_prob)
         self.infos.append(info)
 
     @property
@@ -122,36 +124,14 @@ class EpisodeResultOld(object):
         return f"{self.actions} - {self.rewards}"
 
 
-class ActorCriticBatch(object):
+class PPOBatch(object):
 
-    def __init__(self, states=None, actions=None, values=None, advantages=None):
-        if states is None:
-            states = []
-        if actions is None:
-            actions = []
-        if values is None:
-            values = []
-        if advantages is None:
-            advantages = []
+    def __init__(self, states, actions, values, advantages, log_probs):
         self.states = states
         self.actions = actions
         self.values = values
         self.advantages = advantages
-
-    def append(self, state, action, value, advantage):
-        self.states.append(state)
-        self.actions.append(action)
-        self.values.append(value)
-        self.advantages.append(advantage)
-
-    def get_batch(self, batch_size):
-        sub_batch = ActorCriticBatch(self.states[:batch_size], self.actions[:batch_size], self.values[:batch_size],
-                                     self.advantages[:batch_size])
-        self.states = self.states[batch_size:]
-        self.actions = self.actions[batch_size:]
-        self.values = self.values[batch_size:]
-        self.advantages = self.advantages[batch_size:]
-        return sub_batch
+        self.log_probs = log_probs
 
     def __len__(self):
         return len(self.states)
@@ -159,8 +139,8 @@ class ActorCriticBatch(object):
 
 class EnvironmentsDataset(object):
 
-    def __init__(self, envs: Sequence[Env], model: ActorCriticModel, n_steps, gamma, lambd, batch_size, preprocessor,
-                 device, action_selector=None, epoch_length=None, action_limits=None):
+    def __init__(self, envs: Sequence[Env], model: ActorCriticModel, n_steps, gamma, lambd, num_ppo_rounds, batch_size,
+                 preprocessor, device, action_selector=None, epoch_length=None, action_limits=None):
         self.envs = {idx: e for idx, e in enumerate(envs)}
         self.model = model
         self.num_actions = model.action_dimension
@@ -171,6 +151,7 @@ class EnvironmentsDataset(object):
         self.n_steps = n_steps
         self.gamma = gamma
         self.lambd = lambd
+        self.num_ppo_rounds = num_ppo_rounds
         self.batch_size = batch_size
         self.preprocessor = preprocessor
         self.device = device
@@ -196,13 +177,11 @@ class EnvironmentsDataset(object):
 
             gaes.append(gae)
 
-        advantage_t = torch.FloatTensor(np.array(list(reversed(gaes)))).to(self.device)
-        value_t = torch.FloatTensor(np.array(list(reversed(values)))).to(self.device)
+        advantage_t = torch.FloatTensor(np.array(list(reversed(gaes))))
+        value_t = torch.FloatTensor(np.array(list(reversed(values))))
         return advantage_t, value_t
 
     def data(self):
-        batch = ActorCriticBatch()
-        er_returns = []
         cur_batch_idx = 0
 
         while True:
@@ -213,16 +192,17 @@ class EnvironmentsDataset(object):
             with torch.no_grad():
                 policy_out, vals_out = self.model(in_ts)
 
+                # TODO refactor action_selector into model
                 actions = self.action_selector(policy_out, self.action_limits)
+                log_probs = self.model.log_prob(policy_out, actions).detach().cpu()
 
-            # TODO test
             eb: EpisodesBuffer
-            for (k, eb), a, v in zip(self.episode_buffers, actions, vals_out):
+            for (k, eb), a, v, lp in zip(self.episode_buffers, actions, vals_out, log_probs):
                 s, r, d, i = self.envs[k].step(a)
-                eb.append(a, r, s, d, v, i)
+                eb.append(a, r, s, d, v, lp, i)
 
             if len([(k, eb) for k, eb in self.episode_buffers if (len(eb) > self.n_steps)]) == len(self.envs):
-
+                # TODO calculate episode returns in here
                 adv_v_per_env = [self.calculate_gae_and_value(eb) for k, eb in self.episode_buffers]
                 adv_t, val_t = list(zip(*adv_v_per_env))
                 adv_t = torch.cat(adv_t)
@@ -231,29 +211,27 @@ class EnvironmentsDataset(object):
                 adv_std, adv_mean = torch.std_mean(adv_t)
                 adv_t = (adv_t - adv_mean) / adv_std
 
-                states_t = [[self.preprocessor.preprocess(s) for s in eb.states[:-1]] for k, eb in self.episode_buffers]
+                states_t = [self.preprocessor.preprocess(s) for k, eb in self.episode_buffers for s in eb.states[:-1]]
                 states_t = torch.cat(states_t)
                 actions_t = torch.cat([a for k, eb in self.episode_buffers for a in eb.actions[:-1]])
+                log_prob_t = torch.cat([lp for k, eb in self.episode_buffers for lp in eb.log_probs[:-1]])
 
                 # TODO
-                for eb, val, adv in zip(batch_ers, n_step_returns, advantages):
-                    batch.append(self.preprocessor.preprocess(eb.cur_state(self.n_steps)), eb.cur_action(self.n_steps),
-                                 float(val), float(adv))
+                assert len(states_t) == len(actions_t) == len(adv_t) == len(val_t) == self.n_steps
 
-                # TODO
-                eb: EpisodesBuffer
-                for eb in batch_ers:
-                    len_er = len(eb)
-                    er_r_ud = eb.get_final_return()
-                    er_r = eb.update_state(self.n_steps, gamma=self.gamma)
-                    if er_r is not None:
-                        er_returns.append((len_er, er_r, er_r_ud))
+                for _ in range(self.num_ppo_rounds):
+                    for batch_offset in range(0, len(self.n_steps), self.batch_size):
+                        batch_states_t = states_t[batch_offset: batch_offset + self.batch_size]
+                        batch_actions_t = actions_t[batch_offset: batch_offset + self.batch_size]
+                        batch_adv_t = adv_t[batch_offset: batch_offset + self.batch_size]
+                        batch_val_t = val_t[batch_offset: batch_offset + self.batch_size]
+                        batch_log_prob_t = log_prob_t[batch_offset: batch_offset + self.batch_size]
+                        batch = PPOBatch(batch_states_t, batch_actions_t, batch_val_t, batch_adv_t, batch_log_prob_t)
+                        yield batch
+                        # TODO returns
+                    pass
 
-                if len(batch) >= self.batch_size:
-                    yield er_returns, batch.get_batch(self.batch_size)
-
-                    er_returns = []
-
+                    # TODO remove?
                     if self.epoch_length is not None:
                         cur_batch_idx += 1
                         if cur_batch_idx >= self.epoch_length:

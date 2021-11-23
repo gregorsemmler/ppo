@@ -1,5 +1,8 @@
+import math
+
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from atari_wrappers import LazyFrames
@@ -56,11 +59,54 @@ class ActorCriticModel(nn.Module):
     def is_shared(self) -> bool:
         raise NotImplementedError()
 
+    @property
+    def action_limits(self):
+        return None
+
     def actor_parameters(self):
         raise NotImplementedError()
 
     def critic_parameters(self):
         raise NotImplementedError()
+
+    def entropy(self, policy_out):
+        if self.discrete:
+            log_probs_out = F.log_softmax(policy_out, dim=1)
+            probs_out = F.softmax(policy_out, dim=1)
+            entropy = (probs_out * log_probs_out).sum(dim=1)
+            return entropy
+
+        mean, log_std = policy_out
+
+        if self.action_limits is not None:
+            low, high = self.action_limits
+            log_std = torch.clamp(log_std, math.log(1e-5), 2 * math.log(high - low))
+
+        # Entropy of normal distribution:
+        entropy = 0.5 + 0.5 * math.log(2 * math.pi) + log_std
+        return entropy
+
+    def log_prob(self, policy_out, actions):
+        if self.discrete:
+            log_probs_out = F.log_softmax(policy_out, dim=1)
+            probs_out = F.softmax(policy_out, dim=1)
+
+            log_probs = log_probs_out[range(len(probs_out)), actions]
+            return log_probs
+
+        mean, log_std = policy_out
+
+        if self.action_limits is not None:
+            low, high = self.action_limits
+            mean = torch.clamp(mean, low, high)
+            log_std = torch.clamp(log_std, math.log(1e-5), 2 * math.log(high - low))
+
+        actions = torch.FloatTensor(np.array(actions)).to(self.device)
+
+        # Log of normal distribution:
+        variance = torch.exp(2 * log_std)
+        log_probs = -((actions - mean) ** 2) / (2 * variance) - log_std - math.log(math.sqrt(2 * math.pi))
+        return log_probs
 
 
 class MLPModel(ActorCriticModel):
