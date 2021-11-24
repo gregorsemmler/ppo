@@ -1,7 +1,7 @@
 import logging
 import math
 import uuid
-from typing import Sequence
+from typing import Sequence, Dict
 
 import torch
 import torch.nn.functional as F
@@ -89,6 +89,15 @@ class EpisodesBuffer(object):
         return self.states[idx], self.actions[idx], self.rewards[idx], self.dones[idx], \
                self.values[idx], self.next_values[idx], self.infos[idx]
 
+    def reset(self, start_state):
+        self.states = [start_state]
+        self.actions = []
+        self.rewards = []
+        self.dones = []
+        self.values = []
+        self.log_probs = []
+        self.infos = []
+
 
 # TODO refactor
 class EpisodeResultOld(object):
@@ -141,7 +150,7 @@ class EnvironmentsDataset(object):
 
     def __init__(self, envs: Sequence[Env], model: ActorCriticModel, n_steps, gamma, lambd, num_ppo_rounds, batch_size,
                  preprocessor, device, action_selector=None, epoch_length=None, action_limits=None):
-        self.envs = {idx: e for idx, e in enumerate(envs)}
+        self.envs: Dict[int, Env] = {idx: e for idx, e in enumerate(envs)}
         self.model = model
         self.num_actions = model.action_dimension
         self.discrete = model.is_discrete
@@ -166,20 +175,35 @@ class EnvironmentsDataset(object):
         gae = 0.0
         gaes = []
         values = []
+        episode_returns = []
+        cur_return = 0.0
+        cur_undiscounted_return = 0.0
+        cur_ep_len = 0
 
         for state, action, reward, done, value, next_value, info in reversed(episodes_buffer)[:-1]:
             if done:
                 delta = reward - value
                 gae = delta
+                if cur_ep_len > 0:
+                    episode_returns.append((cur_ep_len, cur_return, cur_undiscounted_return))
+                    cur_return = 0.0
+                    cur_ep_len = 0
             else:
                 delta = reward + self.gamma * next_value - value
                 gae = delta + self.gamma * self.lambd * gae
 
+            cur_return = self.gamma * cur_return + reward
+            cur_undiscounted_return += reward
+            cur_ep_len += 1
+
             gaes.append(gae)
+
+        if cur_ep_len > 0:
+            episode_returns.append((cur_ep_len, cur_return, cur_undiscounted_return))
 
         advantage_t = torch.FloatTensor(np.array(list(reversed(gaes))))
         value_t = torch.FloatTensor(np.array(list(reversed(values))))
-        return advantage_t, value_t
+        return advantage_t, value_t, episode_returns
 
     def data(self):
         cur_batch_idx = 0
@@ -202,11 +226,16 @@ class EnvironmentsDataset(object):
                 eb.append(a, r, s, d, v, lp, i)
 
             if len([(k, eb) for k, eb in self.episode_buffers if (len(eb) > self.n_steps)]) == len(self.envs):
-                # TODO calculate episode returns in here
-                adv_v_per_env = [self.calculate_gae_and_value(eb) for k, eb in self.episode_buffers]
-                adv_t, val_t = list(zip(*adv_v_per_env))
-                adv_t = torch.cat(adv_t)
-                val_t = torch.cat(val_t)
+                advs, vs, ep_returns, ep_lengths = [], [], [], []
+
+                for k, eb in self.episode_buffers:
+                    a_t, v_t, ep_rs = self.calculate_gae_and_value(eb)
+                    advs.append(a_t)
+                    vs.append(v_t)
+                    ep_returns.extend(ep_rs)
+
+                adv_t = torch.cat(advs)
+                val_t = torch.cat(vs)
 
                 adv_std, adv_mean = torch.std_mean(adv_t)
                 adv_t = (adv_t - adv_mean) / adv_std
@@ -227,17 +256,17 @@ class EnvironmentsDataset(object):
                         batch_val_t = val_t[batch_offset: batch_offset + self.batch_size]
                         batch_log_prob_t = log_prob_t[batch_offset: batch_offset + self.batch_size]
                         batch = PPOBatch(batch_states_t, batch_actions_t, batch_val_t, batch_adv_t, batch_log_prob_t)
-                        yield batch
-                        # TODO returns
+                        yield ep_returns, batch
+
+                    cur_batch_idx += 1
+                    if self.epoch_length is not None and cur_batch_idx >= self.epoch_length:
+                        self.reset()
                     pass
 
-                    # TODO remove?
-                    if self.epoch_length is not None:
-                        cur_batch_idx += 1
-                        if cur_batch_idx >= self.epoch_length:
-                            return
+                for k, eb in self.episode_buffers:
+                    eb.reset(self.envs[k].reset())
 
     def reset(self):
-        # TODO implement
+        # TODO test
         self.episode_buffers = sorted({k: EpisodesBuffer(e.reset()) for k, e in self.envs.items()})
 
