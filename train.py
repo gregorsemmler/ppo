@@ -14,7 +14,7 @@ from torch.optim import Adam
 import torch.multiprocessing as mp
 from torch.utils.tensorboard import SummaryWriter
 
-from data import EnvironmentsDataset, Policy
+from data import EnvironmentsDataset, Policy, PPOBatch
 from model import ActorCriticModel
 from play import play_environment
 from common import save_checkpoint, load_checkpoint, GracefulExit, get_action_space_details, get_model, \
@@ -75,7 +75,7 @@ class ActorCriticReturnScheduler(object):
             self.set_critic_lr(self.begin_critic_lr)
 
 
-class ActorCriticTrainer(object):
+class PPOTrainer(object):
 
     def __init__(self, config, model: ActorCriticModel, model_id, trainer_id=None, optimizer=None,
                  critic_optimizer=None, scheduler=None, checkpoint_path=None, save_optimizer=False, writer=None,
@@ -84,6 +84,7 @@ class ActorCriticTrainer(object):
         self.value_factor = config.value_factor
         self.policy_factor = config.policy_factor
         self.entropy_factor = config.entropy_factor
+        self.clip_ratio = config.ppo_clip_ratio
         self.max_norm = config.max_norm
         self.lr = config.lr
         self.gamma = config.gamma
@@ -308,44 +309,31 @@ class ActorCriticTrainer(object):
                     f"Policy Loss: {ep_p_l:.6g} Value Loss: {ep_v_l:.6g} Entropy Loss: {ep_e_l:.6g} "
                     f"Episode Length: {ep_episode_length:.6g} Episode Return: {ep_episode_returns:.6g}")
 
-    def calculate_policy_and_entropy_loss(self, actions, advantages, policy_out):
-        if self.discrete:
-            log_probs_out = F.log_softmax(policy_out, dim=1)
-            probs_out = F.softmax(policy_out, dim=1)
+    def calculate_policy_and_entropy_loss(self, actions, advantages, policy_out, old_log_probs):
+        log_prob = self.model.log_prob(policy_out, actions)
+        ratio = torch.exp(log_prob - old_log_probs)
 
-            policy_loss = advantages * log_probs_out[range(len(probs_out)), actions]
-            policy_loss = self.policy_factor * -policy_loss.mean()
-            entropy_loss = self.entropy_factor * (probs_out * log_probs_out).sum(dim=1).mean()
-            return policy_loss, entropy_loss
+        surr_obj = advantages * ratio
+        clipped_obj = advantages * torch.clamp(ratio, 1.0 - self.clip_ratio, 1.0 + self.clip_ratio)
+        policy_loss = self.policy_factor * -torch.min(surr_obj, clipped_obj).mean()
 
-        mean, log_std = policy_out
+        entropy_loss = self.entropy_factor * self.model.entropy(policy_out).mean()
 
-        if self.action_limits:
-            low, high = self.action_limits
-            mean = torch.clamp(mean, low, high)
-            log_std = torch.clamp(log_std, math.log(1e-5), 2 * math.log(high - low))
-
-        variance = torch.exp(2 * log_std)
-
-        actions = torch.FloatTensor(np.array(actions)).to(self.device)
-        # Log of normal distribution:
-        log_probs = -((actions - mean) ** 2) / (2 * variance) - log_std - math.log(math.sqrt(2 * math.pi))
-        policy_loss = self.policy_factor * -(advantages * log_probs).mean()
-        # Entropy of normal distribution:
-        entropy_loss = self.entropy_factor * (0.5 + 0.5 * math.log(2 * math.pi) + log_std).mean()
         return policy_loss, entropy_loss
 
-    def training_step(self, batch, batch_idx):
-        states_t = torch.cat(batch.states).to(self.device)
-        actions = batch.actions
-        values_t = torch.FloatTensor(np.array(batch.values)).to(self.device)
-        advantages_t = torch.FloatTensor(np.array(batch.advantages)).to(self.device)
+    def training_step(self, batch: PPOBatch, batch_idx):
+        states_t = batch.states.to(self.device)
+        actions_t = batch.actions.to(self.device)
+        values_t = batch.values.to(self.device)
+        advantages_t = batch.advantages.to(self.device)
+        old_log_prob_t = batch.log_probs.to(self.device)
 
         policy_out, value_out = self.model(states_t)
 
         value_loss = self.value_factor * F.mse_loss(value_out.squeeze(-1), values_t)
 
-        policy_loss, entropy_loss = self.calculate_policy_and_entropy_loss(actions, advantages_t, policy_out)
+        policy_loss, entropy_loss = self.calculate_policy_and_entropy_loss(actions_t, advantages_t, policy_out,
+                                                                           old_log_prob_t)
 
         if self.shared:
             loss = entropy_loss + value_loss + policy_loss
@@ -398,6 +386,7 @@ def main():
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--lambd", type=float, default=0.95)
     parser.add_argument("--n_ppo_rounds", type=int, default=10)
+    parser.add_argument("--ppo_clip_ratio", type=float, default=0.2)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--critic_lr", type=float, default=1e-3)
@@ -407,7 +396,6 @@ def main():
     parser.add_argument("--l2_regularization", type=float, default=0)
     parser.add_argument("--critic_eps", type=float, default=1e-3)
     parser.add_argument("--critic_l2_regularization", type=float, default=0)
-    parser.add_argument("--epoch_length", type=int, default=2000)
     parser.add_argument("--n_eval_episodes", type=int, default=0)
     parser.add_argument("--n_epochs", type=int, default=-1)
     parser.add_argument("--n_mean_results", type=int, default=100)
@@ -487,7 +475,6 @@ def training(args, model, trainer_id, device):
     lambd = args.lambd
     batch_size = args.batch_size
     atari = args.atari
-    epoch_length = args.epoch_length
     target_mean_returns = args.target_mean_returns
     checkpoint_path = args.checkpoint_path
     num_epochs = args.n_epochs if args.n_epochs > 0 else None
@@ -508,12 +495,12 @@ def training(args, model, trainer_id, device):
 
     # TODO
     dataset = EnvironmentsDataset(environments, model, n_steps, gamma, lambd, num_ppo_rounds, batch_size, preprocessor,
-                                  device, epoch_length=epoch_length, action_limits=limits)
+                                  device, action_limits=limits)
 
     graceful_exiter = GracefulExit() if args.graceful_exit else None
-    trainer = ActorCriticTrainer(args, model, model_id, trainer_id=trainer_id, writer=writer,
-                                 num_mean_results=num_mean_results, target_mean_returns=target_mean_returns,
-                                 checkpoint_path=checkpoint_path, graceful_exiter=graceful_exiter, action_limits=limits)
+    trainer = PPOTrainer(args, model, model_id, trainer_id=trainer_id, writer=writer,
+                         num_mean_results=num_mean_results, target_mean_returns=target_mean_returns,
+                         checkpoint_path=checkpoint_path, graceful_exiter=graceful_exiter, action_limits=limits)
     eval_policy = Policy(model, preprocessor, device, action_limits=limits)
     trainer.fit(dataset, eval_env, eval_policy, num_epochs=num_epochs)
 

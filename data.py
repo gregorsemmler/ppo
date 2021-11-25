@@ -149,7 +149,7 @@ class PPOBatch(object):
 class EnvironmentsDataset(object):
 
     def __init__(self, envs: Sequence[Env], model: ActorCriticModel, n_steps, gamma, lambd, num_ppo_rounds, batch_size,
-                 preprocessor, device, action_selector=None, epoch_length=None, action_limits=None):
+                 preprocessor, device, action_selector=None, action_limits=None):
         self.envs: Dict[int, Env] = {idx: e for idx, e in enumerate(envs)}
         self.model = model
         self.num_actions = model.action_dimension
@@ -168,8 +168,6 @@ class EnvironmentsDataset(object):
             action_selector = categorical_action_selector if model.is_discrete else normal_action_selector
         self.action_selector = action_selector
         self.episode_buffers = {}
-        self.epoch_length = epoch_length
-        self.reset()
 
     def calculate_gae_and_value(self, episodes_buffer: EpisodesBuffer):
         gae = 0.0
@@ -206,7 +204,7 @@ class EnvironmentsDataset(object):
         return advantage_t, value_t, episode_returns
 
     def data(self):
-        cur_batch_idx = 0
+        self.reset()
 
         while True:
 
@@ -245,7 +243,7 @@ class EnvironmentsDataset(object):
                 actions_t = torch.cat([a for k, eb in self.episode_buffers for a in eb.actions[:-1]])
                 log_prob_t = torch.cat([lp for k, eb in self.episode_buffers for lp in eb.log_probs[:-1]])
 
-                # TODO
+                # TODO remove
                 assert len(states_t) == len(actions_t) == len(adv_t) == len(val_t) == self.n_steps
 
                 for _ in range(self.num_ppo_rounds):
@@ -258,15 +256,5 @@ class EnvironmentsDataset(object):
                         batch = PPOBatch(batch_states_t, batch_actions_t, batch_val_t, batch_adv_t, batch_log_prob_t)
                         yield ep_returns, batch
 
-                    cur_batch_idx += 1
-                    if self.epoch_length is not None and cur_batch_idx >= self.epoch_length:
-                        self.reset()
-                    pass
-
-                for k, eb in self.episode_buffers:
-                    eb.reset(self.envs[k].reset())
-
     def reset(self):
-        # TODO test
         self.episode_buffers = sorted({k: EpisodesBuffer(e.reset()) for k, e in self.envs.items()})
-
