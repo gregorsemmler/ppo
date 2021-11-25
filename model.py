@@ -87,6 +87,7 @@ class ActorCriticModel(nn.Module):
         return entropy
 
     def log_prob(self, policy_out, actions):
+
         if self.discrete:
             log_probs_out = F.log_softmax(policy_out, dim=1)
             probs_out = F.softmax(policy_out, dim=1)
@@ -95,13 +96,14 @@ class ActorCriticModel(nn.Module):
             return log_probs
 
         mean, log_std = policy_out
+        device = mean.device
 
         if self.action_limits is not None:
             low, high = self.action_limits
             mean = torch.clamp(mean, low, high)
             log_std = torch.clamp(log_std, math.log(1e-5), 2 * math.log(high - low))
 
-        actions = torch.FloatTensor(np.array(actions)).to(self.device)
+        actions = torch.FloatTensor(np.array(actions)).to(device)
 
         # Log of normal distribution:
         variance = torch.exp(2 * log_std)

@@ -23,7 +23,7 @@ def categorical_action_selector(policy_out, action_limits=None):
 def normal_action_selector(policy_out, action_limits=None):
     mean, log_std = policy_out
 
-    if action_limits is None:
+    if action_limits is not None:
         low, high = action_limits
         mean = torch.clamp(mean, low, high)
         log_std = torch.clamp(log_std, math.log(1e-5), 2 * math.log(high - low))
@@ -99,10 +99,9 @@ class EpisodesBuffer(object):
         self.infos = []
 
 
-# TODO refactor
-class EpisodeResultOld(object):
+class EpisodeResult(object):
 
-    def __init__(self, env, start_state, episode_id=None, partial_unroll=True):
+    def __init__(self, env, start_state, episode_id=None):
         self.env = env
         self.states = [start_state]
         self.actions = []
@@ -111,7 +110,6 @@ class EpisodeResultOld(object):
         self.done = False
         self.episode_id = episode_id if episode_id is not None else str(uuid.uuid4())
         self.get_offset = 0
-        self.partial_unroll = partial_unroll
 
     def append(self, action, reward, state, done, info=None):
         if self.done:
@@ -178,7 +176,7 @@ class EnvironmentsDataset(object):
         cur_undiscounted_return = 0.0
         cur_ep_len = 0
 
-        for state, action, reward, done, value, next_value, info in reversed(episodes_buffer)[:-1]:
+        for state, action, reward, done, value, next_value, info in list(reversed(episodes_buffer))[:-1]:
             if done:
                 delta = reward - value
                 gae = delta
@@ -223,6 +221,8 @@ class EnvironmentsDataset(object):
                 s, r, d, i = self.envs[k].step(a)
                 eb.append(a, r, s, d, v, lp, i)
 
+                # TODO reset environment if done
+
             if len([(k, eb) for k, eb in self.episode_buffers if (len(eb) > self.n_steps)]) == len(self.envs):
                 advs, vs, ep_returns, ep_lengths = [], [], [], []
 
@@ -257,4 +257,4 @@ class EnvironmentsDataset(object):
                         yield ep_returns, batch
 
     def reset(self):
-        self.episode_buffers = sorted({k: EpisodesBuffer(e.reset()) for k, e in self.envs.items()})
+        self.episode_buffers = sorted([(k, EpisodesBuffer(e.reset())) for k, e in self.envs.items()])
