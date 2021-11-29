@@ -167,7 +167,7 @@ class EnvironmentsDataset(object):
         self.action_selector = action_selector
         self.episode_buffers = {}
 
-    def calculate_gae_and_value(self, episodes_buffer: EpisodesBuffer):
+    def calculate_gae_and_value(self, eps_buffer: EpisodesBuffer):
         gae = 0.0
         gaes = []
         values = []
@@ -176,7 +176,7 @@ class EnvironmentsDataset(object):
         cur_undiscounted_return = 0.0
         cur_ep_len = 0
 
-        for state, action, reward, done, value, next_value, info in list(reversed(episodes_buffer))[:-1]:
+        for idx, (state, action, reward, done, value, next_value, info) in enumerate(list(reversed(eps_buffer))[1:]):
             if done:
                 delta = reward - value
                 gae = delta
@@ -193,12 +193,13 @@ class EnvironmentsDataset(object):
             cur_ep_len += 1
 
             gaes.append(gae)
+            values.append(gae + value)
 
         if cur_ep_len > 0:
             episode_returns.append((cur_ep_len, cur_return, cur_undiscounted_return))
 
-        advantage_t = torch.FloatTensor(np.array(list(reversed(gaes))))
-        value_t = torch.FloatTensor(np.array(list(reversed(values))))
+        advantage_t = torch.FloatTensor(list(reversed(gaes)))
+        value_t = torch.FloatTensor(list(reversed(values)))
         return advantage_t, value_t, episode_returns
 
     def data(self):
@@ -215,11 +216,16 @@ class EnvironmentsDataset(object):
                 # TODO refactor action_selector into model
                 actions = self.action_selector(policy_out, self.action_limits)
                 log_probs = self.model.log_prob(policy_out, actions).detach().cpu()
+                vals_out = vals_out.detach().cpu()
 
             eb: EpisodesBuffer
-            for (k, eb), a, v, lp in zip(self.episode_buffers, actions, vals_out, log_probs):
-                s, r, d, i = self.envs[k].step(a)
-                eb.append(a, r, s, d, v, lp, i)
+            for (k, eb), action, value, logprob in zip(self.episode_buffers, actions, vals_out, log_probs):
+                state, reward, done, info = self.envs[k].step(action)
+
+                if done:
+                    state = self.envs[k].reset()
+
+                eb.append(action, reward, state, done, value, logprob, info)
 
                 # TODO reset environment if done
 
@@ -238,16 +244,24 @@ class EnvironmentsDataset(object):
                 adv_std, adv_mean = torch.std_mean(adv_t)
                 adv_t = (adv_t - adv_mean) / adv_std
 
-                states_t = [self.preprocessor.preprocess(s) for k, eb in self.episode_buffers for s in eb.states[:-1]]
+                states_t = [self.preprocessor.preprocess(s) for k, eb in self.episode_buffers for s in
+                            eb.states[:len(adv_t)]]
                 states_t = torch.cat(states_t)
-                actions_t = torch.cat([a for k, eb in self.episode_buffers for a in eb.actions[:-1]])
+                actions_t = torch.FloatTensor(np.concatenate(
+                    [a for k, eb in self.episode_buffers for a in eb.actions[:-1]]))
                 log_prob_t = torch.cat([lp for k, eb in self.episode_buffers for lp in eb.log_probs[:-1]])
+                if len(actions_t.shape) == 1:
+                    actions_t = actions_t[:, np.newaxis]
+                if len(log_prob_t.shape) == 1:
+                    log_prob_t = log_prob_t[:, np.newaxis]
+                if len(adv_t.shape) == 1:
+                    adv_t = adv_t[:, np.newaxis]
 
                 # TODO remove
                 assert len(states_t) == len(actions_t) == len(adv_t) == len(val_t) == self.n_steps
 
                 for _ in range(self.num_ppo_rounds):
-                    for batch_offset in range(0, len(self.n_steps), self.batch_size):
+                    for batch_offset in range(0, self.n_steps, self.batch_size):
                         batch_states_t = states_t[batch_offset: batch_offset + self.batch_size]
                         batch_actions_t = actions_t[batch_offset: batch_offset + self.batch_size]
                         batch_adv_t = adv_t[batch_offset: batch_offset + self.batch_size]

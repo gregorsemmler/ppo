@@ -103,7 +103,10 @@ class ActorCriticModel(nn.Module):
             mean = torch.clamp(mean, low, high)
             log_std = torch.clamp(log_std, math.log(1e-5), 2 * math.log(high - low))
 
-        actions = torch.FloatTensor(np.array(actions)).to(device)
+        if isinstance(actions, torch.Tensor):
+            actions = actions.to(device)
+        else:
+            actions = torch.FloatTensor(np.array(actions)).to(device)
 
         # Log of normal distribution:
         variance = torch.exp(2 * log_std)
