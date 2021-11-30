@@ -14,11 +14,12 @@ from data import Policy, EpisodeResult
 logger = logging.getLogger(__name__)
 
 
-def play_environment(env, policy, num_episodes=100, render=False, gamma=1.0, video_save_path=None, run_id=None):
+def play_environment(env, policy, num_episodes=100, render=False, gamma=1.0, video_save_path=None, run_id=None,
+                     verbose=True):
     i = 0
     best_return = float("-inf")
     best_result = None
-    episode_returns = []
+    episode_infos = []
 
     if video_save_path is not None:
         sub_folder = f"{datetime.now():%d%m%Y_%H%M%S}" if run_id is None else str(run_id)
@@ -35,7 +36,7 @@ def play_environment(env, policy, num_episodes=100, render=False, gamma=1.0, vid
             if render:
                 env.render()
 
-            action = int(policy(state))
+            action = policy(state).squeeze()
             new_state, reward, done, info = env.step(action)
 
             episode_result.append(action, reward, new_state, done, info)
@@ -43,17 +44,22 @@ def play_environment(env, policy, num_episodes=100, render=False, gamma=1.0, vid
             state = new_state
 
         episode_return = episode_result.calculate_return(gamma)
+        undisc_return = episode_result.calculate_return(1.0)
+        ep_len = len(episode_result)
         if best_return < episode_return:
             best_return = episode_return
             best_result = episode_result
-            logger.info("New best return: {}".format(best_return))
+            if verbose:
+                logger.info(f"New best return: {best_return:.3g}")
 
-        episode_returns.append(episode_return)
-        logger.info(f"Episode {i} Length & Return: {len(episode_result.states)} {episode_return:.3f}")
+        episode_infos.append((episode_return, undisc_return, ep_len))
+        if verbose:
+            logger.info(f"Episode {i}: Return: {episode_return:.3g} "
+                        f"(Undiscounted: {undisc_return:.3g}) Length: {ep_len}")
 
         i += 1
 
-    return episode_returns, best_result, best_return
+    return episode_infos, best_result, best_return
 
 
 def evaluate_model():

@@ -453,7 +453,7 @@ class ResidualModel(ActorCriticModel):
 
 
 def get_model(env_name, shared_model, atari, device, fixed_std=True):
-    if env_name == "SimpleCorridor":
+    if env_name == "SimpleCorridorEnv":
         eval_env = SimpleCorridorEnv()
         state = eval_env.reset()
         in_states = state.shape[0]

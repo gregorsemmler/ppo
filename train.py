@@ -91,6 +91,9 @@ class PPOTrainer(object):
         self.undiscounted_log = config.undiscounted_log
         self.log_frequency = config.log_frequency
         self.num_eval_episodes = config.n_eval_episodes
+        self.eval_frequency = config.n_eval_frequency
+        self.save_best_eval_model = config.save_best_eval
+        self.best_eval_returns = float("-inf")
         self.num_mean_results = num_mean_results
         self.target_mean_returns = target_mean_returns
 
@@ -215,9 +218,22 @@ class PPOTrainer(object):
                     logger.info(f"Saved model to '{save_path}'")
                 break
 
-            if self.num_eval_episodes > 0:
+            if self.num_eval_episodes > 0 and self.curr_epoch_idx % self.eval_frequency == 0:
                 logger.info(f"{self.trainer_id}# Validation")
-                play_environment(eval_env, eval_policy, num_episodes=self.num_eval_episodes, gamma=self.gamma)
+                ep_infos, _, _ = play_environment(eval_env, eval_policy, num_episodes=self.num_eval_episodes,
+                                                  gamma=self.gamma, verbose=False)
+                ep_rets, ep_u_rets, ep_lens = list(zip(*ep_infos))
+                mean_ep_rets = np.mean(ep_rets)
+                mean_ep_u_rets = np.mean(ep_u_rets)
+                mean_ep_lens = np.mean(ep_lens)
+                logger.info(f"Played {self.num_eval_episodes} Episodes. Return: {mean_ep_rets}, "
+                            f"Undiscounted Return: {mean_ep_u_rets}, Lengths: {mean_ep_lens}")
+                eval_rets = mean_ep_u_rets if self.undiscounted_log else mean_ep_rets
+                if eval_rets > self.best_eval_returns:
+                    filename = f"{self.model_id}_{eval_rets:.5g}_{datetime.now():%d%m%Y_%H%M%S}.tar"
+                    self.save_checkpoint(filename, best=True)
+                    logger.info(f"Saved new best model {filename}.")
+                    self.best_eval_returns = eval_rets
 
             if not self.batch_wise_scheduler:
                 self.scheduler_step(self.get_mean_returns())
@@ -396,7 +412,8 @@ def main():
     parser.add_argument("--l2_regularization", type=float, default=0)
     parser.add_argument("--critic_eps", type=float, default=1e-3)
     parser.add_argument("--critic_l2_regularization", type=float, default=0)
-    parser.add_argument("--n_eval_episodes", type=int, default=0)
+    parser.add_argument("--n_eval_episodes", type=int, default=10)
+    parser.add_argument("--n_eval_frequency", type=int, default=10)
     parser.add_argument("--n_epochs", type=int, default=-1)
     parser.add_argument("--n_mean_results", type=int, default=100)
     parser.add_argument("--target_mean_returns", type=float)
@@ -424,8 +441,10 @@ def main():
     parser.add_argument("--no_tensorboardlog", dest="tensorboardlog", action="store_false")
     parser.add_argument("--graceful_exit", dest="graceful_exit", action="store_true")
     parser.add_argument("--no_graceful_exit", dest="graceful_exit", action="store_false")
-    parser.set_defaults(atari=True, partial_unroll=True, graceful_exit=True, undiscounted_log=True, shared_model=False,
-                        tensorboardlog=False, fixed_std=True)
+    parser.add_argument("--save_best_eval", dest="save_best_eval", action="store_true")
+    parser.add_argument("--no_save_best_eval", dest="save_best_eval", action="store_false")
+    parser.set_defaults(atari=True, graceful_exit=True, undiscounted_log=True, shared_model=False,
+                        tensorboardlog=False, fixed_std=True, save_best_eval=True)
 
     args = parser.parse_args()
 
@@ -455,15 +474,18 @@ def main():
 
     mp.set_start_method("spawn")
 
-    processes = []
-    for trainer_id in range(args.n_processes):
-        p = mp.Process(target=training, args=(args, model, trainer_id, device))
+    if args.n_processes == 1:
+        training(args, model, 0, device)
+    else:
+        processes = []
+        for trainer_id in range(args.n_processes):
+            p = mp.Process(target=training, args=(args, model, trainer_id, device))
 
-        p.start()
-        processes.append(p)
+            p.start()
+            processes.append(p)
 
-    for p in processes:
-        p.join()
+        for p in processes:
+            p.join()
 
 
 def training(args, model, trainer_id, device):
@@ -493,7 +515,6 @@ def training(args, model, trainer_id, device):
     _, _, limits = get_action_space_details(eval_env.action_space)
     writer = SummaryWriter(comment=f"-{run_id}") if args.tensorboardlog else DummySummaryWriter()
 
-    # TODO
     dataset = EnvironmentsDataset(environments, model, n_steps, gamma, lambd, num_ppo_rounds, batch_size, preprocessor,
                                   device, action_limits=limits)
 

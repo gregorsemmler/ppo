@@ -130,6 +130,9 @@ class EpisodeResult(object):
     def __str__(self):
         return f"{self.actions} - {self.rewards}"
 
+    def __len__(self):
+        return len(self.states)
+
 
 class PPOBatch(object):
 
@@ -183,6 +186,7 @@ class EnvironmentsDataset(object):
                 if cur_ep_len > 0:
                     episode_returns.append((cur_ep_len, cur_return, cur_undiscounted_return))
                     cur_return = 0.0
+                    cur_undiscounted_return = 0.0
                     cur_ep_len = 0
             else:
                 delta = reward + self.gamma * next_value - value
@@ -245,16 +249,17 @@ class EnvironmentsDataset(object):
                 states_t = [self.preprocessor.preprocess(s) for k, eb in self.episode_buffers for s in
                             eb.states[:len(adv_t)]]
                 states_t = torch.cat(states_t)
-                actions_t = torch.FloatTensor(np.stack(
+                actions_t = torch.from_numpy(np.stack(
                     [a for k, eb in self.episode_buffers for a in eb.actions[:-1]]))
-                log_prob_t = torch.cat([lp for k, eb in self.episode_buffers for lp in eb.log_probs[:-1]])
+                log_prob_t = torch.stack([lp for k, eb in self.episode_buffers for lp in eb.log_probs[:-1]])
+                if len(actions_t.shape) == 1:
+                    actions_t = actions_t[:, np.newaxis]
                 if len(log_prob_t.shape) == 1:
                     log_prob_t = log_prob_t[:, np.newaxis]
                 if len(adv_t.shape) == 1:
                     adv_t = adv_t[:, np.newaxis]
 
-                assert len(actions_t.shape) > 1
-                assert len(states_t) == len(actions_t) == len(adv_t) == len(val_t) == self.n_steps
+                assert len(states_t) == len(actions_t) == len(adv_t) == len(val_t) == len(log_prob_t) == self.n_steps
 
                 for _ in range(self.num_ppo_rounds):
                     for batch_offset in range(0, self.n_steps, self.batch_size):

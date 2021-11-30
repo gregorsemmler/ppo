@@ -61,7 +61,7 @@ def clip_mean_std(mean, log_std, low, high, log_std_min=1e-5, log_std_max_factor
 
 
 def get_environment(env_name, atari):
-    if env_name == "SimpleCorridor":
+    if env_name == "SimpleCorridorEnv":
         return SimpleCorridorEnv()
     elif atari:
         return wrap_deepmind(make_atari(env_name))
