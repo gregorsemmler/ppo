@@ -1,19 +1,19 @@
 import argparse
 import logging
-import math
 from collections import deque
 from datetime import datetime
 from os import makedirs
 from os.path import join
 
+import numpy as np
+import roboschool
 import torch
+import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 from torch.optim import Adam
-import torch.multiprocessing as mp
 from torch.utils.tensorboard import SummaryWriter
-import roboschool
+
 
 from data import EnvironmentsDataset, Policy, PPOBatch
 from model import ActorCriticModel, get_model, get_preprocessor
@@ -229,7 +229,7 @@ class PPOTrainer(object):
                 logger.info(f"Played {self.num_eval_episodes} Episodes. Return: {mean_ep_rets}, "
                             f"Undiscounted Return: {mean_ep_u_rets}, Lengths: {mean_ep_lens}")
                 eval_rets = mean_ep_u_rets if self.undiscounted_log else mean_ep_rets
-                if eval_rets > self.best_eval_returns:
+                if eval_rets > self.best_eval_returns and self.save_best_eval_model:
                     filename = f"{self.model_id}_{eval_rets:.5g}_{datetime.now():%d%m%Y_%H%M%S}.tar"
                     self.save_checkpoint(filename, best=True)
                     logger.info(f"Saved new best model {filename}.")
@@ -417,8 +417,8 @@ def main():
     parser.add_argument("--n_epochs", type=int, default=-1)
     parser.add_argument("--n_mean_results", type=int, default=100)
     parser.add_argument("--target_mean_returns", type=float)
-    parser.add_argument("--value_factor", type=float, default=1.0)
     parser.add_argument("--policy_factor", type=float, default=1.0)
+    parser.add_argument("--value_factor", type=float, default=1.0)
     parser.add_argument("--entropy_factor", type=float, default=0.01)
     parser.add_argument("--max_norm", type=float, default=0.1)
     parser.add_argument("--checkpoint_path", default=None)
@@ -443,7 +443,7 @@ def main():
     parser.add_argument("--no_graceful_exit", dest="graceful_exit", action="store_false")
     parser.add_argument("--save_best_eval", dest="save_best_eval", action="store_true")
     parser.add_argument("--no_save_best_eval", dest="save_best_eval", action="store_false")
-    parser.set_defaults(atari=True, graceful_exit=True, undiscounted_log=True, shared_model=False,
+    parser.set_defaults(atari=False, graceful_exit=True, undiscounted_log=True, shared_model=False,
                         tensorboardlog=False, fixed_std=True, save_best_eval=True)
 
     args = parser.parse_args()

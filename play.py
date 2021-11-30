@@ -4,17 +4,18 @@ import os
 from datetime import datetime
 from os.path import join
 
+import roboschool
 import torch
 from gym.wrappers import Monitor
 
 from common import load_checkpoint, get_environment
-from model import get_model, get_preprocessor
 from data import Policy, EpisodeResult
+from model import get_model, get_preprocessor
 
 logger = logging.getLogger(__name__)
 
 
-def play_environment(env, policy, num_episodes=100, render=False, gamma=1.0, video_save_path=None, run_id=None,
+def play_environment(env, policy, num_episodes=1, render=False, gamma=1.0, video_save_path=None, run_id=None,
                      verbose=True):
     i = 0
     best_return = float("-inf")
@@ -50,13 +51,12 @@ def play_environment(env, policy, num_episodes=100, render=False, gamma=1.0, vid
             best_return = episode_return
             best_result = episode_result
             if verbose:
-                logger.info(f"New best return: {best_return:.3g}")
+                logger.info(f"New best return: {best_return:.5g}")
 
         episode_infos.append((episode_return, undisc_return, ep_len))
         if verbose:
-            logger.info(f"Episode {i}: Return: {episode_return:.3g} "
-                        f"(Undiscounted: {undisc_return:.3g}) Length: {ep_len}")
-
+            logger.info(f"Episode {i}: Return: {episode_return:.5g} "
+                        f"(Undiscounted: {undisc_return:.5g}) Length: {ep_len}")
         i += 1
 
     return episode_infos, best_result, best_return
@@ -69,10 +69,9 @@ def evaluate_model():
     parser.add_argument("--model_path", required=True)
     parser.add_argument("--video_path")
     parser.add_argument("--gamma", type=float, default=1.0)
-    parser.add_argument("--env_name", type=str, default="PongNoFrameskip-v4")
-    parser.add_argument("--render", type=bool, default=True)
+    parser.add_argument("--env_name", type=str, required=True)
     parser.add_argument("--device_token", default=None)
-    parser.add_argument("--n_episodes", type=int, default=10)
+    parser.add_argument("--n_episodes", type=int, default=1)
     parser.add_argument("--run_id", default=None)
     parser.add_argument("--atari", dest="atari", action="store_true")
     parser.add_argument("--no_atari", dest="atari", action="store_false")
@@ -80,7 +79,9 @@ def evaluate_model():
     parser.add_argument("--no_shared_model", dest="shared_model", action="store_false")
     parser.add_argument("--fixed_std", dest="fixed_std", action="store_true")
     parser.add_argument("--no_fixed_std", dest="fixed_std", action="store_false")
-    parser.set_defaults(atari=True, shared_model=False, fixed_std=False)
+    parser.add_argument("--render", dest="render", action="store_true")
+    parser.add_argument("--no_render", dest="render", action="store_false")
+    parser.set_defaults(atari=False, shared_model=False, fixed_std=False, render=True)
     args = parser.parse_args()
 
     env_name = args.env_name
