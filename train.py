@@ -219,7 +219,7 @@ class PPOTrainer(object):
                 break
 
             if self.num_eval_episodes > 0 and self.curr_epoch_idx % self.eval_frequency == 0:
-                logger.info(f"{self.trainer_id}# Validation")
+                logger.info(f"{self.trainer_id}# Evaluation")
                 ep_infos, _, _ = play_environment(eval_env, eval_policy, num_episodes=self.num_eval_episodes,
                                                   gamma=self.gamma, verbose=False)
                 ep_rets, ep_u_rets, ep_lens = list(zip(*ep_infos))
@@ -229,6 +229,10 @@ class PPOTrainer(object):
                 logger.info(f"Played {self.num_eval_episodes} Episodes. Return: {mean_ep_rets}, "
                             f"Undiscounted Return: {mean_ep_u_rets}, Lengths: {mean_ep_lens}")
                 eval_rets = mean_ep_u_rets if self.undiscounted_log else mean_ep_rets
+                self.writer.add_scalar(f"eval_epoch/return", mean_ep_rets, self.curr_epoch_idx)
+                self.writer.add_scalar(f"eval_epoch/undisc_return", mean_ep_u_rets, self.curr_epoch_idx)
+                self.writer.add_scalar(f"eval_epoch/episode_length", mean_ep_lens, self.curr_epoch_idx)
+
                 if eval_rets > self.best_eval_returns and self.save_best_eval_model:
                     filename = f"{self.model_id}_{eval_rets:.5g}_{datetime.now():%d%m%Y_%H%M%S}.tar"
                     self.save_checkpoint(filename, best=True)
