@@ -413,7 +413,7 @@ def main():
     parser.add_argument("--critic_eps", type=float, default=1e-3)
     parser.add_argument("--critic_l2_regularization", type=float, default=0)
     parser.add_argument("--n_eval_episodes", type=int, default=10)
-    parser.add_argument("--n_eval_frequency", type=int, default=10)
+    parser.add_argument("--n_eval_frequency", type=int, default=1)
     parser.add_argument("--n_epochs", type=int, default=-1)
     parser.add_argument("--n_mean_results", type=int, default=100)
     parser.add_argument("--target_mean_returns", type=float)
