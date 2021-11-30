@@ -7,7 +7,8 @@ from os.path import join
 import torch
 from gym.wrappers import Monitor
 
-from common import load_checkpoint, get_environment, get_preprocessor, get_model
+from common import load_checkpoint, get_environment
+from model import get_model, get_preprocessor
 from data import Policy, EpisodeResult
 
 logger = logging.getLogger(__name__)

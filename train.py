@@ -13,12 +13,12 @@ import numpy as np
 from torch.optim import Adam
 import torch.multiprocessing as mp
 from torch.utils.tensorboard import SummaryWriter
+import roboschool
 
 from data import EnvironmentsDataset, Policy, PPOBatch
-from model import ActorCriticModel
+from model import ActorCriticModel, get_model, get_preprocessor
 from play import play_environment
-from common import save_checkpoint, load_checkpoint, GracefulExit, get_action_space_details, get_model, \
-    get_preprocessor, get_environment
+from common import save_checkpoint, load_checkpoint, GracefulExit, get_action_space_details, get_environment
 
 logger = logging.getLogger(__name__)
 
@@ -382,7 +382,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_processes", type=int, default=1)
     parser.add_argument("--n_envs", type=int, default=1)
-    parser.add_argument("--n_steps", type=int, default=4)
+    parser.add_argument("--n_steps", type=int, default=2049)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--lambd", type=float, default=0.95)
     parser.add_argument("--n_ppo_rounds", type=int, default=10)

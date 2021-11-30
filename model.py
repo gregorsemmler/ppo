@@ -1,11 +1,14 @@
 import math
 
+import gym
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 
-from atari_wrappers import LazyFrames
+from atari_wrappers import LazyFrames, wrap_deepmind, make_atari
+from common import clip_mean_std, get_action_space_details
+from envs import SimpleCorridorEnv
 
 
 def get_output_shape(layer, shape):
@@ -80,7 +83,7 @@ class ActorCriticModel(nn.Module):
 
         if self.action_limits is not None:
             low, high = self.action_limits
-            log_std = torch.clamp(log_std, math.log(1e-5), 2 * math.log(high - low))
+            mean, log_std = clip_mean_std(mean, log_std, low, high)
 
         # Entropy of normal distribution:
         entropy = 0.5 + 0.5 * math.log(2 * math.pi) + log_std
@@ -100,8 +103,7 @@ class ActorCriticModel(nn.Module):
 
         if self.action_limits is not None:
             low, high = self.action_limits
-            mean = torch.clamp(mean, low, high)
-            log_std = torch.clamp(log_std, math.log(1e-5), 2 * math.log(high - low))
+            mean, log_std = clip_mean_std(mean, log_std, low, high)
 
         if isinstance(actions, torch.Tensor):
             actions = actions.to(device)
@@ -448,3 +450,39 @@ class ResidualModel(ActorCriticModel):
         if not self.fixed_std:
             return (self.policy_mean(p_shared_out), self.policy_log_std(p_shared_out)), self.val_head(tower_out)
         return (self.policy_mean(p_shared_out), self.policy_log_std), self.val_head(tower_out)
+
+
+def get_model(env_name, shared_model, atari, device, fixed_std=True):
+    if env_name == "SimpleCorridor":
+        eval_env = SimpleCorridorEnv()
+        state = eval_env.reset()
+        in_states = state.shape[0]
+        discrete, action_dim, limits = get_action_space_details(eval_env.action_space)
+        if shared_model:
+            return SharedMLPModel(in_states, action_dim, fixed_std=fixed_std, discrete=discrete).to(device)
+        return MLPModel(in_states, action_dim, fixed_std=fixed_std, discrete=discrete).to(device)
+    elif atari:
+        eval_env = wrap_deepmind(make_atari(env_name))
+        state = eval_env.reset()
+
+        preprocessor = SimpleCNNPreProcessor()
+        in_t = preprocessor.preprocess(state)
+        discrete, action_dim, limits = get_action_space_details(eval_env.action_space)
+        input_shape = tuple(in_t.shape)[1:]
+        return CNNModel(input_shape, action_dim, discrete=discrete, fixed_std=fixed_std).to(device)
+
+    eval_env = gym.make(env_name)
+    state = eval_env.reset()
+    in_states = state.shape[0]
+    discrete, action_dim, limits = get_action_space_details(eval_env.action_space)
+    if shared_model:
+        return SharedMLPModel(in_states, action_dim, fixed_std=fixed_std, discrete=discrete).to(device)
+    return MLPModel(in_states, action_dim, fixed_std=fixed_std, discrete=discrete).to(device)
+
+
+def get_preprocessor(env_name, atari):
+    if env_name == "SimpleCorridor":
+        return NoopPreProcessor()
+    elif atari:
+        return SimpleCNNPreProcessor()
+    return NoopPreProcessor()

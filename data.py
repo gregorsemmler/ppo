@@ -9,6 +9,7 @@ import numpy as np
 from gym import Env
 from torch.distributions import Categorical, Normal
 
+from common import clip_mean_std
 from model import ActorCriticModel
 
 logger = logging.getLogger(__name__)
@@ -25,8 +26,7 @@ def normal_action_selector(policy_out, action_limits=None):
 
     if action_limits is not None:
         low, high = action_limits
-        mean = torch.clamp(mean, low, high)
-        log_std = torch.clamp(log_std, math.log(1e-5), 2 * math.log(high - low))
+        mean, log_std = clip_mean_std(mean, log_std, low, high)
 
     std_dev = torch.exp(log_std)
     actions = Normal(mean, std_dev).sample().detach().cpu().numpy()
@@ -227,8 +227,6 @@ class EnvironmentsDataset(object):
 
                 eb.append(action, reward, state, done, value, logprob, info)
 
-                # TODO reset environment if done
-
             if len([(k, eb) for k, eb in self.episode_buffers if (len(eb) > self.n_steps)]) == len(self.envs):
                 advs, vs, ep_returns, ep_lengths = [], [], [], []
 
@@ -247,17 +245,15 @@ class EnvironmentsDataset(object):
                 states_t = [self.preprocessor.preprocess(s) for k, eb in self.episode_buffers for s in
                             eb.states[:len(adv_t)]]
                 states_t = torch.cat(states_t)
-                actions_t = torch.FloatTensor(np.concatenate(
+                actions_t = torch.FloatTensor(np.stack(
                     [a for k, eb in self.episode_buffers for a in eb.actions[:-1]]))
                 log_prob_t = torch.cat([lp for k, eb in self.episode_buffers for lp in eb.log_probs[:-1]])
-                if len(actions_t.shape) == 1:
-                    actions_t = actions_t[:, np.newaxis]
                 if len(log_prob_t.shape) == 1:
                     log_prob_t = log_prob_t[:, np.newaxis]
                 if len(adv_t.shape) == 1:
                     adv_t = adv_t[:, np.newaxis]
 
-                # TODO remove
+                assert len(actions_t.shape) > 1
                 assert len(states_t) == len(actions_t) == len(adv_t) == len(val_t) == self.n_steps
 
                 for _ in range(self.num_ppo_rounds):
@@ -269,6 +265,8 @@ class EnvironmentsDataset(object):
                         batch_log_prob_t = log_prob_t[batch_offset: batch_offset + self.batch_size]
                         batch = PPOBatch(batch_states_t, batch_actions_t, batch_val_t, batch_adv_t, batch_log_prob_t)
                         yield ep_returns, batch
+
+                return
 
     def reset(self):
         self.episode_buffers = sorted([(k, EpisodesBuffer(e.reset())) for k, e in self.envs.items()])
