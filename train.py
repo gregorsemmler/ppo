@@ -422,9 +422,8 @@ def main():
     parser.add_argument("--entropy_factor", type=float, default=0.01)
     parser.add_argument("--max_norm", type=float, default=0.1)
     parser.add_argument("--checkpoint_path", default=None)
-    parser.add_argument("--save_optimizer", type=bool, default=False)
     parser.add_argument("--pretrained_path", default=None)
-    parser.add_argument("--env_name", type=str, default="PongNoFrameskip-v4")
+    parser.add_argument("--env_name", type=str, required=True)
     parser.add_argument("--device_token", default=None)
     parser.add_argument("--run_id", default=None)
     parser.add_argument("--model_id", default=None)
@@ -443,8 +442,10 @@ def main():
     parser.add_argument("--no_graceful_exit", dest="graceful_exit", action="store_false")
     parser.add_argument("--save_best_eval", dest="save_best_eval", action="store_true")
     parser.add_argument("--no_save_best_eval", dest="save_best_eval", action="store_false")
+    parser.add_argument("--save_optimizer", dest="save_optimizer", action="store_true")
+    parser.add_argument("--no_save_optimizer", dest="save_optimizer", action="store_false")
     parser.set_defaults(atari=False, graceful_exit=True, undiscounted_log=True, shared_model=False,
-                        tensorboardlog=False, fixed_std=True, save_best_eval=True)
+                        tensorboardlog=False, fixed_std=True, save_best_eval=True, save_optimizer=False)
 
     args = parser.parse_args()
 
