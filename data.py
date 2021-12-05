@@ -35,7 +35,7 @@ def normal_action_selector(policy_out, action_limits=None):
 
 class Policy(object):
 
-    def __init__(self, model, preprocessor, device, action_selector=None, action_limits=None):
+    def __init__(self, model, preprocessor, device, action_selector=None, action_limits=None, squeeze_output=True):
         self.model = model
         self.preprocessor = preprocessor
         self.device = device
@@ -43,6 +43,7 @@ class Policy(object):
             action_selector = categorical_action_selector if model.is_discrete else normal_action_selector
         self.action_selector = action_selector
         self.action_limits = action_limits
+        self.squeeze_output = squeeze_output
 
     def __call__(self, state):
         in_ts = self.preprocessor.preprocess(state).to(self.device)
@@ -50,6 +51,9 @@ class Policy(object):
         with torch.no_grad():
             policy_out, vals_out = self.model(in_ts)
             actions = self.action_selector(policy_out, self.action_limits)
+
+        if self.squeeze_output:
+            actions = actions.squeeze()
 
         return actions
 

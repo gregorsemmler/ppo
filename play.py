@@ -37,7 +37,7 @@ def play_environment(env, policy, num_episodes=1, render=False, gamma=1.0, video
             if render:
                 env.render()
 
-            action = policy(state).squeeze()
+            action = policy(state)
             new_state, reward, done, info = env.step(action)
 
             episode_result.append(action, reward, new_state, done, info)
