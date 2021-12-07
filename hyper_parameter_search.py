@@ -54,8 +54,10 @@ def search_parameters():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_rounds", type=int, default=100)
+    parser.add_argument("--best_key", type=str)
     search_args = parser.parse_args()
     n_rounds = search_args.n_rounds
+    best_key = search_args.best_key
 
     namespace = SimpleNamespace()
     for action in TRAIN_ARG_PARSER._actions:
@@ -68,6 +70,10 @@ def search_parameters():
     hyperparams = load_json(hyperparams_path)
 
     tuner = RandomSearchTuner(hyperparams, n_rounds)
+    search_results = []
+
+    best_value = float("-inf")
+    best_config = None
 
     for config in tuner.get_configurations():
         new_args = deepcopy(namespace)
@@ -75,7 +81,15 @@ def search_parameters():
             setattr(new_args, attr_name, value)
 
         model, device = get_model_from_args(new_args)
-        training(new_args, model, device)
+        metrics = training(new_args, model, device)
+        search_results.append((config, metrics))
+
+        if best_key is not None:
+            cur_val = np.mean(metrics[best_key])
+            if cur_val > best_value:
+                best_value = cur_val
+                best_config = config
+        print("")
 
     print("")
     pass

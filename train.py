@@ -1,6 +1,6 @@
 import argparse
 import logging
-from collections import deque
+from collections import deque, defaultdict
 from datetime import datetime
 from os import makedirs
 from os.path import join
@@ -179,6 +179,8 @@ class PPOTrainer(object):
         return path
 
     def fit(self, dataset_train, eval_env, eval_policy, num_epochs=None, training_seed=None):
+        result_metrics = defaultdict(list)
+
         if training_seed is not None:
             np.random.seed(training_seed)
             torch.backends.cudnn.deterministic = True
@@ -201,7 +203,10 @@ class PPOTrainer(object):
         while num_epochs is None or self.curr_epoch_idx < num_epochs:
             logger.info(f"{self.trainer_id}# Epoch {self.curr_epoch_idx}")
             logger.info(f"{self.trainer_id}# Training")
-            self.train(dataset_train)
+            epoch_metrics = self.train(dataset_train)
+
+            for k, v in epoch_metrics.items():
+                result_metrics[k].append(v)
 
             if self.target_reached:
                 logger.info(f"Reached target mean returns. Ending training.")
@@ -220,34 +225,50 @@ class PPOTrainer(object):
 
             if self.num_eval_episodes > 0 and self.curr_epoch_idx % self.eval_frequency == 0:
                 logger.info(f"{self.trainer_id}# Evaluation")
-                ep_infos, _, _ = play_environment(eval_env, eval_policy, num_episodes=self.num_eval_episodes,
-                                                  gamma=self.gamma, verbose=False)
-                ep_rets, ep_u_rets, ep_lens = list(zip(*ep_infos))
-                mean_ep_rets = np.mean(ep_rets)
-                mean_ep_u_rets = np.mean(ep_u_rets)
-                mean_ep_lens = np.mean(ep_lens)
-                logger.info(f"Played {self.num_eval_episodes} Episodes. Return: {mean_ep_rets}, "
-                            f"Undiscounted Return: {mean_ep_u_rets}, Lengths: {mean_ep_lens}")
-                eval_rets = mean_ep_u_rets if self.undiscounted_log else mean_ep_rets
-                self.writer.add_scalar(f"eval_epoch/return", mean_ep_rets, self.curr_epoch_idx)
-                self.writer.add_scalar(f"eval_epoch/undisc_return", mean_ep_u_rets, self.curr_epoch_idx)
-                self.writer.add_scalar(f"eval_epoch/episode_length", mean_ep_lens, self.curr_epoch_idx)
+                eval_metrics = self.evaluate(eval_env, eval_policy)
 
-                if eval_rets > self.best_eval_returns and self.save_best_eval_model:
-                    filename = f"{self.model_id}_{eval_rets:.5g}_{datetime.now():%d%m%Y_%H%M%S}.tar"
-                    self.save_checkpoint(filename, best=True)
-                    logger.info(f"Saved new best model {filename}.")
-                    self.best_eval_returns = eval_rets
+                for k, v in eval_metrics.items():
+                    result_metrics[k].append(v)
 
             if not self.batch_wise_scheduler:
                 self.scheduler_step(self.get_mean_returns())
             self.curr_epoch_idx += 1
             self.save_checkpoint()
 
+        return result_metrics
+
     def get_mean_returns(self):
         return 0.0 if len(self.last_returns) == 0 else sum(self.last_returns) / len(self.last_returns)
 
+    def evaluate(self, eval_env, eval_policy):
+        eval_metrics = {}
+        ep_infos, _, _ = play_environment(eval_env, eval_policy, num_episodes=self.num_eval_episodes,
+                                          gamma=self.gamma, verbose=False)
+        ep_rets, ep_u_rets, ep_lens = list(zip(*ep_infos))
+        mean_ep_rets = np.mean(ep_rets)
+        mean_ep_u_rets = np.mean(ep_u_rets)
+        mean_ep_lens = np.mean(ep_lens)
+        logger.info(f"Played {self.num_eval_episodes} Episodes. Return: {mean_ep_rets}, "
+                    f"Undiscounted Return: {mean_ep_u_rets}, Lengths: {mean_ep_lens}")
+        eval_rets = mean_ep_u_rets if self.undiscounted_log else mean_ep_rets
+
+        log_tag_and_values = [(f"eval_epoch/return", mean_ep_rets, self.curr_epoch_idx),
+                              (f"eval_epoch/undisc_return", mean_ep_u_rets, self.curr_epoch_idx),
+                              (f"eval_epoch/episode_length", mean_ep_lens, self.curr_epoch_idx)]
+        for tag, val, idx in log_tag_and_values:
+            eval_metrics[tag] = val
+            self.writer.add_scalar(tag, val, idx)
+
+        if eval_rets > self.best_eval_returns and self.save_best_eval_model:
+            filename = f"{self.model_id}_{eval_rets:.5g}_{datetime.now():%d%m%Y_%H%M%S}.tar"
+            self.save_checkpoint(filename, best=True)
+            logger.info(f"Saved new best model {filename}.")
+            self.best_eval_returns = eval_rets
+
+        return eval_metrics
+
     def train(self, dataset):
+        result_metrics = {}
         self.model.train()
 
         ep_l = 0.0
@@ -320,14 +341,19 @@ class PPOTrainer(object):
         ep_episode_length /= max(1.0, count_epoch_episodes)
         ep_episode_returns /= max(1.0, count_epoch_episodes)
 
-        self.writer.add_scalar(f"train_epoch/loss", ep_l, self.curr_epoch_idx)
-        self.writer.add_scalar(f"train_epoch/policy_loss", ep_p_l, self.curr_epoch_idx)
-        self.writer.add_scalar(f"train_epoch/value_loss", ep_v_l, self.curr_epoch_idx)
-        self.writer.add_scalar(f"train_epoch/episode_length", ep_episode_length, self.curr_epoch_idx)
-        self.writer.add_scalar(f"train_epoch/episode_return", ep_episode_returns, self.curr_epoch_idx)
+        log_tag_and_values = [(f"train_epoch/loss", ep_l, self.curr_epoch_idx),
+                              (f"train_epoch/policy_loss", ep_p_l, self.curr_epoch_idx),
+                              (f"train_epoch/value_loss", ep_v_l, self.curr_epoch_idx),
+                              (f"train_epoch/episode_length", ep_episode_length, self.curr_epoch_idx),
+                              (f"train_epoch/episode_return", ep_episode_returns, self.curr_epoch_idx)]
+        for tag, val, idx in log_tag_and_values:
+            result_metrics[tag] = val
+            self.writer.add_scalar(tag, val, idx)
+
         logger.info(f"{self.trainer_id}# Epoch {self.curr_epoch_idx}: Loss: {ep_l:.6g} "
                     f"Policy Loss: {ep_p_l:.6g} Value Loss: {ep_v_l:.6g} Entropy Loss: {ep_e_l:.6g} "
                     f"Episode Length: {ep_episode_length:.6g} Episode Return: {ep_episode_returns:.6g}")
+        return result_metrics
 
     def calculate_policy_and_entropy_loss(self, actions, advantages, policy_out, old_log_probs):
         log_prob = self.model.log_prob(policy_out, actions)
@@ -446,7 +472,7 @@ TRAIN_ARG_PARSER.add_argument("--no_save_best_eval", dest="save_best_eval", acti
 TRAIN_ARG_PARSER.add_argument("--save_optimizer", dest="save_optimizer", action="store_true")
 TRAIN_ARG_PARSER.add_argument("--no_save_optimizer", dest="save_optimizer", action="store_false")
 TRAIN_ARG_PARSER.set_defaults(atari=False, graceful_exit=True, undiscounted_log=True, shared_model=False,
-                              tensorboardlog=False, fixed_std=True, save_best_eval=True, save_optimizer=False)
+                              tensorboardlog=False, fixed_std=True, save_best_eval=False, save_optimizer=False)
 
 
 def get_model_from_args(args):
