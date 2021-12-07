@@ -178,17 +178,18 @@ class EnvironmentsDataset(object):
         gae = 0.0
         gaes = []
         values = []
-        episode_returns = []
+        episode_infos = []
         cur_return = 0.0
         cur_undiscounted_return = 0.0
         cur_ep_len = 0
+        complete_final_episode = eps_buffer.dones[-2]
 
         for idx, (state, action, reward, done, value, next_value, info) in enumerate(list(reversed(eps_buffer))[1:]):
             if done:
                 delta = reward - value
                 gae = delta
                 if cur_ep_len > 0:
-                    episode_returns.append((cur_ep_len, cur_return, cur_undiscounted_return))
+                    episode_infos.append((cur_ep_len, cur_return, cur_undiscounted_return))
                     cur_return = 0.0
                     cur_undiscounted_return = 0.0
                     cur_ep_len = 0
@@ -204,11 +205,14 @@ class EnvironmentsDataset(object):
             values.append(gae + value)
 
         if cur_ep_len > 0:
-            episode_returns.append((cur_ep_len, cur_return, cur_undiscounted_return))
+            episode_infos.append((cur_ep_len, cur_return, cur_undiscounted_return))
+
+        if not complete_final_episode:
+            episode_infos = episode_infos[1:]
 
         advantage_t = torch.FloatTensor(list(reversed(gaes)))
         value_t = torch.FloatTensor(list(reversed(values)))
-        return advantage_t, value_t, episode_returns
+        return advantage_t, value_t, episode_infos
 
     def data(self):
         self.reset()

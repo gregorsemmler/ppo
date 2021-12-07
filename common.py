@@ -1,3 +1,4 @@
+import json
 import logging
 import math
 import signal
@@ -17,6 +18,19 @@ CHECKPOINT_MODEL = "model"
 CHECKPOINT_OPTIMIZER = "optimizer"
 CHECKPOINT_CRITIC_OPTIMIZER = "critic_optimizer"
 CHECKPOINT_MODEL_ID = "model_id"
+
+
+def load_json(path, *args, **kwargs):
+    with open(path, "r") as f:
+        return json.load(f, *args, **kwargs)
+
+
+def save_json(path, data, prettify=True, *args, **kwargs):
+    with open(path, "w") as f:
+        if prettify:
+            json.dump(data, f, indent=4, sort_keys=True, separators=(",", ": "), ensure_ascii=False, *args, **kwargs)
+        else:
+            json.dump(data, f, *args, **kwargs)
 
 
 def load_checkpoint(path, model, optimizer=None, critic_optimizer=None, device="cpu"):

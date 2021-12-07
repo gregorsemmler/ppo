@@ -396,66 +396,62 @@ class PPOTrainer(object):
         return total_loss, p_loss, v_loss, e_loss
 
 
-def main():
-    logging.basicConfig(level=logging.INFO)
+TRAIN_ARG_PARSER = argparse.ArgumentParser()
+TRAIN_ARG_PARSER.add_argument("--n_processes", type=int, default=1)
+TRAIN_ARG_PARSER.add_argument("--n_envs", type=int, default=1)
+TRAIN_ARG_PARSER.add_argument("--n_steps", type=int, default=2049)
+TRAIN_ARG_PARSER.add_argument("--gamma", type=float, default=0.99)
+TRAIN_ARG_PARSER.add_argument("--lambd", type=float, default=0.95)
+TRAIN_ARG_PARSER.add_argument("--n_ppo_rounds", type=int, default=10)
+TRAIN_ARG_PARSER.add_argument("--ppo_clip_ratio", type=float, default=0.2)
+TRAIN_ARG_PARSER.add_argument("--batch_size", type=int, default=128)
+TRAIN_ARG_PARSER.add_argument("--lr", type=float, default=1e-3)
+TRAIN_ARG_PARSER.add_argument("--critic_lr", type=float, default=1e-3)
+TRAIN_ARG_PARSER.add_argument("--scheduler_returns", type=lambda s: [int(e) for e in s.split(",")])
+TRAIN_ARG_PARSER.add_argument("--scheduler_factor", type=float, default=0.1)
+TRAIN_ARG_PARSER.add_argument("--eps", type=float, default=1e-3)
+TRAIN_ARG_PARSER.add_argument("--l2_regularization", type=float, default=0)
+TRAIN_ARG_PARSER.add_argument("--critic_eps", type=float, default=1e-3)
+TRAIN_ARG_PARSER.add_argument("--critic_l2_regularization", type=float, default=0)
+TRAIN_ARG_PARSER.add_argument("--n_eval_episodes", type=int, default=10)
+TRAIN_ARG_PARSER.add_argument("--n_eval_frequency", type=int, default=1)
+TRAIN_ARG_PARSER.add_argument("--n_epochs", type=int, default=-1)
+TRAIN_ARG_PARSER.add_argument("--n_mean_results", type=int, default=100)
+TRAIN_ARG_PARSER.add_argument("--target_mean_returns", type=float)
+TRAIN_ARG_PARSER.add_argument("--policy_factor", type=float, default=1.0)
+TRAIN_ARG_PARSER.add_argument("--value_factor", type=float, default=1.0)
+TRAIN_ARG_PARSER.add_argument("--entropy_factor", type=float, default=0.01)
+TRAIN_ARG_PARSER.add_argument("--max_norm", type=float, default=0.1)
+TRAIN_ARG_PARSER.add_argument("--checkpoint_path", default=None)
+TRAIN_ARG_PARSER.add_argument("--pretrained_path", default=None)
+TRAIN_ARG_PARSER.add_argument("--env_name", type=str, required=True)
+TRAIN_ARG_PARSER.add_argument("--device_token", default=None)
+TRAIN_ARG_PARSER.add_argument("--run_id", default=None)
+TRAIN_ARG_PARSER.add_argument("--model_id", default=None)
+TRAIN_ARG_PARSER.add_argument("--log_frequency", type=int, default=1)
+TRAIN_ARG_PARSER.add_argument("--undiscounted_log", dest="undiscounted_log", action="store_true")
+TRAIN_ARG_PARSER.add_argument("--no_undiscounted_log", dest="undiscounted_log", action="store_false")
+TRAIN_ARG_PARSER.add_argument("--atari", dest="atari", action="store_true")
+TRAIN_ARG_PARSER.add_argument("--no_atari", dest="atari", action="store_false")
+TRAIN_ARG_PARSER.add_argument("--shared_model", dest="shared_model", action="store_true")
+TRAIN_ARG_PARSER.add_argument("--no_shared_model", dest="shared_model", action="store_false")
+TRAIN_ARG_PARSER.add_argument("--fixed_std", dest="fixed_std", action="store_true")
+TRAIN_ARG_PARSER.add_argument("--no_fixed_std", dest="fixed_std", action="store_false")
+TRAIN_ARG_PARSER.add_argument("--tensorboardlog", dest="tensorboardlog", action="store_true")
+TRAIN_ARG_PARSER.add_argument("--no_tensorboardlog", dest="tensorboardlog", action="store_false")
+TRAIN_ARG_PARSER.add_argument("--graceful_exit", dest="graceful_exit", action="store_true")
+TRAIN_ARG_PARSER.add_argument("--no_graceful_exit", dest="graceful_exit", action="store_false")
+TRAIN_ARG_PARSER.add_argument("--save_best_eval", dest="save_best_eval", action="store_true")
+TRAIN_ARG_PARSER.add_argument("--no_save_best_eval", dest="save_best_eval", action="store_false")
+TRAIN_ARG_PARSER.add_argument("--save_optimizer", dest="save_optimizer", action="store_true")
+TRAIN_ARG_PARSER.add_argument("--no_save_optimizer", dest="save_optimizer", action="store_false")
+TRAIN_ARG_PARSER.set_defaults(atari=False, graceful_exit=True, undiscounted_log=True, shared_model=False,
+                              tensorboardlog=False, fixed_std=True, save_best_eval=True, save_optimizer=False)
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--n_processes", type=int, default=1)
-    parser.add_argument("--n_envs", type=int, default=1)
-    parser.add_argument("--n_steps", type=int, default=2049)
-    parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--lambd", type=float, default=0.95)
-    parser.add_argument("--n_ppo_rounds", type=int, default=10)
-    parser.add_argument("--ppo_clip_ratio", type=float, default=0.2)
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--critic_lr", type=float, default=1e-3)
-    parser.add_argument("--scheduler_returns", type=lambda s: [int(e) for e in s.split(",")])
-    parser.add_argument("--scheduler_factor", type=float, default=0.1)
-    parser.add_argument("--eps", type=float, default=1e-3)
-    parser.add_argument("--l2_regularization", type=float, default=0)
-    parser.add_argument("--critic_eps", type=float, default=1e-3)
-    parser.add_argument("--critic_l2_regularization", type=float, default=0)
-    parser.add_argument("--n_eval_episodes", type=int, default=10)
-    parser.add_argument("--n_eval_frequency", type=int, default=1)
-    parser.add_argument("--n_epochs", type=int, default=-1)
-    parser.add_argument("--n_mean_results", type=int, default=100)
-    parser.add_argument("--target_mean_returns", type=float)
-    parser.add_argument("--policy_factor", type=float, default=1.0)
-    parser.add_argument("--value_factor", type=float, default=1.0)
-    parser.add_argument("--entropy_factor", type=float, default=0.01)
-    parser.add_argument("--max_norm", type=float, default=0.1)
-    parser.add_argument("--checkpoint_path", default=None)
-    parser.add_argument("--pretrained_path", default=None)
-    parser.add_argument("--env_name", type=str, required=True)
-    parser.add_argument("--device_token", default=None)
-    parser.add_argument("--run_id", default=None)
-    parser.add_argument("--model_id", default=None)
-    parser.add_argument("--log_frequency", type=int, default=1)
-    parser.add_argument("--undiscounted_log", dest="undiscounted_log", action="store_true")
-    parser.add_argument("--no_undiscounted_log", dest="undiscounted_log", action="store_false")
-    parser.add_argument("--atari", dest="atari", action="store_true")
-    parser.add_argument("--no_atari", dest="atari", action="store_false")
-    parser.add_argument("--shared_model", dest="shared_model", action="store_true")
-    parser.add_argument("--no_shared_model", dest="shared_model", action="store_false")
-    parser.add_argument("--fixed_std", dest="fixed_std", action="store_true")
-    parser.add_argument("--no_fixed_std", dest="fixed_std", action="store_false")
-    parser.add_argument("--tensorboardlog", dest="tensorboardlog", action="store_true")
-    parser.add_argument("--no_tensorboardlog", dest="tensorboardlog", action="store_false")
-    parser.add_argument("--graceful_exit", dest="graceful_exit", action="store_true")
-    parser.add_argument("--no_graceful_exit", dest="graceful_exit", action="store_false")
-    parser.add_argument("--save_best_eval", dest="save_best_eval", action="store_true")
-    parser.add_argument("--no_save_best_eval", dest="save_best_eval", action="store_false")
-    parser.add_argument("--save_optimizer", dest="save_optimizer", action="store_true")
-    parser.add_argument("--no_save_optimizer", dest="save_optimizer", action="store_false")
-    parser.set_defaults(atari=False, graceful_exit=True, undiscounted_log=True, shared_model=False,
-                        tensorboardlog=False, fixed_std=True, save_best_eval=True, save_optimizer=False)
 
-    args = parser.parse_args()
-
+def get_model_from_args(args):
     env_name = args.env_name
     atari = args.atari
-    checkpoint_path = args.checkpoint_path
     shared_model = args.shared_model
     pretrained_path = args.pretrained_path
 
@@ -466,25 +462,34 @@ def main():
 
     device = torch.device(device_token)
 
-    if checkpoint_path is not None:
-        best_models_path = join(checkpoint_path, "best")
-        makedirs(checkpoint_path, exist_ok=True)
-        makedirs(best_models_path, exist_ok=True)
-
     model = get_model(env_name, shared_model, atari, device, fixed_std=args.fixed_std)
 
     if pretrained_path is not None:
         load_checkpoint(pretrained_path, model, device=device)
         logger.info(f"Loaded model from '{pretrained_path}'")
 
-    mp.set_start_method("spawn")
+    return model, device
+
+
+def main():
+    logging.basicConfig(level=logging.INFO)
+
+    args = TRAIN_ARG_PARSER.parse_args()
+    checkpoint_path = args.checkpoint_path
+    if checkpoint_path is not None:
+        best_models_path = join(checkpoint_path, "best")
+        makedirs(checkpoint_path, exist_ok=True)
+        makedirs(best_models_path, exist_ok=True)
+
+    model, device = get_model_from_args(args)
 
     if args.n_processes == 1:
-        training(args, model, 0, device)
+        training(args, model, device)
     else:
+        mp.set_start_method("spawn")
         processes = []
         for trainer_id in range(args.n_processes):
-            p = mp.Process(target=training, args=(args, model, trainer_id, device))
+            p = mp.Process(target=training, args=(args, model, device, trainer_id))
 
             p.start()
             processes.append(p)
@@ -493,7 +498,7 @@ def main():
             p.join()
 
 
-def training(args, model, trainer_id, device):
+def training(args, model, device, trainer_id=0):
     logging.basicConfig(level=logging.INFO)
     env_name = args.env_name
     env_count = args.n_envs
@@ -528,7 +533,7 @@ def training(args, model, trainer_id, device):
                          num_mean_results=num_mean_results, target_mean_returns=target_mean_returns,
                          checkpoint_path=checkpoint_path, graceful_exiter=graceful_exiter, action_limits=limits)
     eval_policy = Policy(model, preprocessor, device, action_limits=limits)
-    trainer.fit(dataset, eval_env, eval_policy, num_epochs=num_epochs)
+    return trainer.fit(dataset, eval_env, eval_policy, num_epochs=num_epochs)
 
 
 if __name__ == "__main__":
