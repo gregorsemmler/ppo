@@ -2,6 +2,7 @@
   "env_name": "RoboschoolHalfCheetah-v1",
   "n_steps": ["uniform", [200, 3000]],
   "lr": ["log10_uniform", [1e-5, 1e-2]],
+  "critic_lr": ["uniform", [1e-3, 1e-2]],
   "value_factor": ["uniform", [0.5, 1.0]],
   "n_ppo_rounds": ["choice", [5, 10, 15, 20]]
 }

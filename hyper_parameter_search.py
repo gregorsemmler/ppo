@@ -28,7 +28,10 @@ class RandomSearchTuner(object):
 
         if sample_type == "uniform":
             low, high = sample_limits
-            return lambda: int(np.random.uniform(low, high))
+            if isinstance(low, float):
+                return lambda: float(np.random.uniform(low, high))
+            elif isinstance(low, int):
+                return lambda: int(np.random.randint(low, high))
         elif sample_type == "log10_uniform":
             low, high = sample_limits
             return lambda: float(log10_uniform(low, high))
