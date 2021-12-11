@@ -93,8 +93,10 @@ def search_parameters():
 
     best_value = float("-inf")
     best_config = None
+    best_metrics = None
 
-    for config in tuner.get_configurations():
+    for config_id, config in enumerate(tuner.get_configurations()):
+        logger.info(f"Evaluating config #{config_id}: {config}")
         new_args = deepcopy(namespace)
         for attr_name, value in config.items():
             setattr(new_args, attr_name, value)
@@ -108,12 +110,13 @@ def search_parameters():
             if cur_val > best_value:
                 best_value = cur_val
                 best_config = config
+                best_metrics = {"config": config, "metrics": metrics}
+            if best_metrics is not None:
+                save_json(join(save_path, f"{run_id}_best_metrics.json"), best_metrics)
 
     logger.info(f"Best config: {best_config}")
     logger.info(f"Best value: {best_value}")
     save_json(join(save_path, f"{run_id}_search_results.json"), search_results)
-    if best_config is not None:
-        save_json(join(save_path, f"{run_id}_best_config.json"), search_results)
     print("")
 
 

@@ -1,7 +1,9 @@
 {
   "env_name": "MountainCar-v0",
-  "n_epochs": 1,
+  "n_epochs": 10,
   "n_eval_episodes": 100,
+  "ppo_clip_factor": ["uniform", [0.2, 0.5]],
+  "entropy_factor": 0.0,
   "n_steps": ["uniform", [200, 3000]],
   "lr": ["log10_uniform", [1e-5, 1e-2]],
   "critic_lr": ["log10_uniform", [1e-5, 1e-2]],
