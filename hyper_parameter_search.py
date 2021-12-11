@@ -1,17 +1,31 @@
 import argparse
 import logging
+import os
 from argparse import SUPPRESS
 from copy import deepcopy
+from datetime import datetime
+from os.path import join
 from types import SimpleNamespace
 
 import numpy as np
 
-from common import load_json
+from common import load_json, save_json
 from train import TRAIN_ARG_PARSER, training, get_model_from_args
+
+
+logger = logging.getLogger(__name__)
 
 
 def log10_uniform(low=1e-5, high=1e-2):
     return np.power(10, np.random.uniform(np.log10(low), np.log10(high)))
+
+
+def norm_type(obj):
+    if isinstance(obj, np.int64) or isinstance(obj, np.int32):
+        return int(obj)
+    if isinstance(obj, np.float32) or isinstance(obj, np.float64):
+        return float(obj)
+    return obj
 
 
 class RandomSearchTuner(object):
@@ -29,14 +43,14 @@ class RandomSearchTuner(object):
         if sample_type == "uniform":
             low, high = sample_limits
             if isinstance(low, float):
-                return lambda: float(np.random.uniform(low, high))
+                return lambda: norm_type(np.random.uniform(low, high))
             elif isinstance(low, int):
-                return lambda: int(np.random.randint(low, high))
+                return lambda: norm_type(np.random.randint(low, high))
         elif sample_type == "log10_uniform":
             low, high = sample_limits
-            return lambda: float(log10_uniform(low, high))
+            return lambda: norm_type(log10_uniform(low, high))
         elif sample_type == "choice":
-            return lambda: np.random.choice(sample_limits)
+            return lambda: norm_type(sample_limits[np.random.randint(len(sample_limits))])
         else:
             raise ValueError(f"Unknown Sample Type {sample_type}")
 
@@ -55,9 +69,13 @@ def search_parameters():
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_rounds", type=int, default=100)
     parser.add_argument("--best_key", type=str)
+    parser.add_argument("--save_path", type=str, default="hyperparam_search_results")
+    parser.add_argument("--hyperparams_path", type=str, required=True)
+    parser.add_argument("--run_id", default=None)
     search_args = parser.parse_args()
     n_rounds = search_args.n_rounds
     best_key = search_args.best_key
+    run_id = search_args.run_id if search_args.run_id is not None else f"run_{datetime.now():%d%m%Y_%H%M%S}"
 
     namespace = SimpleNamespace()
     for action in TRAIN_ARG_PARSER._actions:
@@ -66,8 +84,9 @@ def search_parameters():
                 if action.default is not SUPPRESS:
                     setattr(namespace, action.dest, action.default)
 
-    hyperparams_path = "example_hyperparams.json"
-    hyperparams = load_json(hyperparams_path)
+    hyperparams = load_json(search_args.hyperparams_path)
+    save_path = search_args.save_path
+    os.makedirs(save_path, exist_ok=True)
 
     tuner = RandomSearchTuner(hyperparams, n_rounds)
     search_results = []
@@ -89,10 +108,13 @@ def search_parameters():
             if cur_val > best_value:
                 best_value = cur_val
                 best_config = config
-        print("")
 
+    logger.info(f"Best config: {best_config}")
+    logger.info(f"Best value: {best_value}")
+    save_json(join(save_path, f"{run_id}_search_results.json"), search_results)
+    if best_config is not None:
+        save_json(join(save_path, f"{run_id}_best_config.json"), search_results)
     print("")
-    pass
 
 
 if __name__ == "__main__":
