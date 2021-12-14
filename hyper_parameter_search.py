@@ -111,8 +111,8 @@ def search_parameters():
                 best_value = cur_val
                 best_config = config
                 best_metrics = {"config": config, "metrics": metrics}
-            if best_metrics is not None:
-                save_json(join(save_path, f"{run_id}_best_metrics.json"), best_metrics)
+                if best_metrics is not None:
+                    save_json(join(save_path, f"{run_id}_best_metrics.json"), best_metrics)
 
     logger.info(f"Best config: {best_config}")
     logger.info(f"Best value: {best_value}")
