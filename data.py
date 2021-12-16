@@ -1,47 +1,22 @@
 import logging
-import math
 import uuid
 from typing import Sequence, Dict
 
-import torch
-import torch.nn.functional as F
 import numpy as np
+import torch
 from gym import Env
-from torch.distributions import Categorical, Normal
 
-from common import clip_mean_std
 from model import ActorCriticModel
 
 logger = logging.getLogger(__name__)
 
 
-def categorical_action_selector(policy_out, action_limits=None):
-    probs = F.softmax(policy_out, dim=1)
-    actions = Categorical(probs.detach().cpu()).sample().detach().cpu().numpy()
-    return actions if action_limits is None else np.clip(actions, action_limits[0], action_limits[1])
-
-
-def normal_action_selector(policy_out, action_limits=None):
-    mean, log_std = policy_out
-
-    if action_limits is not None:
-        low, high = action_limits
-        mean, log_std = clip_mean_std(mean, log_std, low, high)
-
-    std_dev = torch.exp(log_std)
-    actions = Normal(mean, std_dev).sample().detach().cpu().numpy()
-    return actions if action_limits is None else np.clip(actions, action_limits[0], action_limits[1])
-
-
 class Policy(object):
 
-    def __init__(self, model, preprocessor, device, action_selector=None, action_limits=None, squeeze_output=True):
+    def __init__(self, model, preprocessor, device, action_limits=None, squeeze_output=True):
         self.model = model
         self.preprocessor = preprocessor
         self.device = device
-        if action_selector is None:
-            action_selector = categorical_action_selector if model.is_discrete else normal_action_selector
-        self.action_selector = action_selector
         self.action_limits = action_limits
         self.squeeze_output = squeeze_output
 
@@ -50,7 +25,7 @@ class Policy(object):
 
         with torch.no_grad():
             policy_out, vals_out = self.model(in_ts)
-            actions = self.action_selector(policy_out, self.action_limits)
+            actions = self.model.select_actions(policy_out, self.action_limits)
 
         if self.squeeze_output:
             actions = actions.squeeze()
@@ -154,7 +129,7 @@ class PPOBatch(object):
 class EnvironmentsDataset(object):
 
     def __init__(self, envs: Sequence[Env], model: ActorCriticModel, n_steps, gamma, lambd, num_ppo_rounds, batch_size,
-                 preprocessor, device, action_selector=None, action_limits=None):
+                 preprocessor, device, action_limits=None):
         self.envs: Dict[int, Env] = {idx: e for idx, e in enumerate(envs)}
         self.model = model
         self.num_actions = model.action_dimension
@@ -169,9 +144,6 @@ class EnvironmentsDataset(object):
         self.batch_size = batch_size
         self.preprocessor = preprocessor
         self.device = device
-        if action_selector is None:
-            action_selector = categorical_action_selector if model.is_discrete else normal_action_selector
-        self.action_selector = action_selector
         self.episode_buffers = {}
 
     def calculate_gae_and_value(self, eps_buffer: EpisodesBuffer):
@@ -225,8 +197,7 @@ class EnvironmentsDataset(object):
             with torch.no_grad():
                 policy_out, vals_out = self.model(in_ts)
 
-                # TODO refactor action_selector into model
-                actions = self.action_selector(policy_out, self.action_limits)
+                actions = self.model.select_actions(policy_out, self.action_limits)
                 log_probs = self.model.log_prob(policy_out, actions).detach().cpu()
                 vals_out = vals_out.detach().cpu()
 

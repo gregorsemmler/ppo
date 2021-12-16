@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.distributions import Categorical, Normal
 
 from atari_wrappers import LazyFrames, wrap_deepmind, make_atari
 from common import clip_mean_std, get_action_space_details
@@ -71,6 +72,29 @@ class ActorCriticModel(nn.Module):
 
     def critic_parameters(self):
         raise NotImplementedError()
+
+    @staticmethod
+    def categorical_action_selector(policy_out, action_limits=None):
+        probs = F.softmax(policy_out, dim=1)
+        actions = Categorical(probs.detach().cpu()).sample().detach().cpu().numpy()
+        return actions if action_limits is None else np.clip(actions, action_limits[0], action_limits[1])
+
+    @staticmethod
+    def normal_action_selector(policy_out, action_limits=None):
+        mean, log_std = policy_out
+
+        if action_limits is not None:
+            low, high = action_limits
+            mean, log_std = clip_mean_std(mean, log_std, low, high)
+
+        std_dev = torch.exp(log_std)
+        actions = Normal(mean, std_dev).sample().detach().cpu().numpy()
+        return actions if action_limits is None else np.clip(actions, action_limits[0], action_limits[1])
+
+    def select_actions(self, policy_out, action_limits=None):
+        if self.is_discrete:
+            return self.categorical_action_selector(policy_out, action_limits)
+        return self.normal_action_selector(policy_out, action_limits)
 
     def entropy(self, policy_out):
         if self.discrete:
