@@ -1,12 +1,16 @@
 {
   "env_name": "RoboschoolHalfCheetah-v1",
   "n_epochs": 10,
-  "n_eval_episodes": 100,
   "graceful_exit": false,
   "save_best_eval": false,
+  "n_eval_episodes": 100,
+  "ppo_clip_ratio": ["uniform", [0.1, 0.9]],
+  "lambd": ["uniform", [0.9, 0.999]],
+  "gamma": ["uniform", [0.95, 0.999]],
+  "entropy_factor": 0.0,
   "n_steps": ["uniform", [200, 3000]],
   "lr": ["log10_uniform", [1e-5, 1e-2]],
-  "critic_lr": ["log10_uniform", [1e-3, 1e-2]],
+  "critic_lr": ["log10_uniform", [1e-5, 1e-2]],
   "value_factor": ["uniform", [0.5, 1.0]],
-  "n_ppo_rounds": ["choice", [5, 10, 15, 20]]
+  "n_ppo_rounds": ["uniform", [1, 100]],
 }

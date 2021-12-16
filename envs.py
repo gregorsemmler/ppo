@@ -42,5 +42,5 @@ class SimpleCorridorEnv(Env):
         self.state[self.half_width] = 1
         return self.state
 
-    def render(self, mode='human'):
+    def render(self, mode="human"):
         return np.zeros((1, 1, 3), dtype=np.uint8)
