@@ -472,7 +472,7 @@ TRAIN_ARG_PARSER.add_argument("--no_save_best_eval", dest="save_best_eval", acti
 TRAIN_ARG_PARSER.add_argument("--save_optimizer", dest="save_optimizer", action="store_true")
 TRAIN_ARG_PARSER.add_argument("--no_save_optimizer", dest="save_optimizer", action="store_false")
 TRAIN_ARG_PARSER.set_defaults(atari=False, graceful_exit=True, undiscounted_log=True, shared_model=False,
-                              tensorboardlog=False, fixed_std=True, save_best_eval=False, save_optimizer=False)
+                              tensorboardlog=False, fixed_std=True, save_best_eval=True, save_optimizer=False)
 
 
 def get_model_from_args(args):
