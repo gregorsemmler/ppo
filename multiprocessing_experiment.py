@@ -2,6 +2,7 @@ import signal
 import time
 # import multiprocessing as mp
 import torch.multiprocessing as mp
+import queue
 
 import numpy as np
 
@@ -35,16 +36,22 @@ def subprocess2(idx):
 
 
 def process_return_val(idx, input_val):
-    wait_time = np.random.uniform(input_val)
-    print(f"Subprocess {idx} waiting for {wait_time:.3f}")
+    wait_time = np.random.uniform(5)
+    print(f"Subprocess {idx} with input {input_val} waiting for {wait_time:.3f}")
     time.sleep(wait_time)
     return_val = input_val ** 2
-    print(f"Subprocess {idx} returning {return_val}")
+    print(f"Subprocess {idx} with input {input_val} returning {return_val}")
     return return_val
 
 
-def return_process_wrapper(idx, input_val, return_queue):
-    return_queue.put(process_return_val(idx, input_val))
+def return_process_wrapper(idx, input_queue: mp.Queue, return_queue: mp.Queue):
+    while True:
+        try:
+            input_val = input_queue.get(timeout=0.01)
+        except queue.Empty:
+            break
+        return_queue.put(process_return_val(idx, input_val))
+    print(f"Process {idx} finished.")
 
 
 def main():
@@ -69,16 +76,20 @@ def main():
 
     processes = []
     return_queue = mp.Queue()
-    inputs = [np.random.randint(50) for _ in range(100)]
+    # inputs = [np.random.randint(50) for _ in range(100)]
+    inputs = list(range(100))
+    input_queue = mp.Queue()
+    for el in inputs:
+        input_queue.put(el)
 
-    proc_idx = 0
-    # TODO implement
     for proc_idx in range(num_processes):
-        p = mp.Process(target=return_process_wrapper, args=(proc_idx, input_val, return_queue))
+        p = mp.Process(target=return_process_wrapper, args=(proc_idx, input_queue, return_queue))
         p.start()
         processes.append(p)
     for p in processes:
         p.join()
+
+    print("")
 
     pass
 
