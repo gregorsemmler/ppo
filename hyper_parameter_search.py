@@ -101,9 +101,10 @@ def evaluate_configs(namespace, configs, best_key, run_id, save_path, trainer_id
 
         config_id += 1
 
-    logger.info(f"Best config: {best_config}")
-    logger.info(f"Best value: {best_value}")
-    save_json(join(save_path, f"{run_id}_search_results.json"), search_results)
+    if best_config is not None:
+        logger.info(f"Best config: {best_config}")
+        logger.info(f"Best value: {best_value}")
+        save_json(join(save_path, f"{run_id}_search_results.json"), search_results)
 
     return best_metrics, search_results
 
@@ -166,9 +167,15 @@ def search_parameters():
         best_overall_metrics = None
         best_overall_value = float("-inf")
         overall_search_results = []
-        while return_queue.qsize():
-            proc_ret = return_queue.get()
+        while True:
+            try:
+                proc_ret = return_queue.get(timeout=0.01)
+            except queue.Empty:
+                break
+
             proc_best_metrics, proc_search_results = proc_ret
+            if proc_best_metrics is None or len(proc_search_results) == 0:
+                continue
             proc_best_val = proc_best_metrics["value"]
             if proc_best_val > best_overall_value:
                 best_overall_value = proc_best_val
