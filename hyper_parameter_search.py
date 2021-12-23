@@ -63,11 +63,50 @@ class RandomSearchTuner(object):
                 yield {k: v() if callable(v) else v for k, v in self.hyperparams.items()}
 
 
+def evaluate_configs(namespace, configs, best_key, run_id, save_path):
+    search_results = []
+
+    best_value = float("-inf")
+    best_config = None
+    best_metrics = None
+
+    config_id = 0
+    for config in configs:
+        logger.info(f"Evaluating config #{config_id}: {config}")
+        new_args = deepcopy(namespace)
+
+        for attr_name, value in config.items():
+            setattr(new_args, attr_name, value)
+
+        model, device = get_model_from_args(new_args)
+        metrics = training(new_args, model, device)
+
+        cur_val = np.mean(metrics[best_key])
+        best_metrics = {"config": config, "key": best_key, "value": cur_val, "metrics": metrics}
+        search_results.append(best_metrics)
+
+        if cur_val > best_value:
+            best_value = cur_val
+            best_config = config
+            best_metrics = {"config": config, "key": best_key, "value": best_value, "metrics": metrics}
+            if best_metrics is not None:
+                save_json(join(save_path, f"{run_id}_best_metrics.json"), best_metrics)
+
+        config_id += 1
+
+    logger.info(f"Best config: {best_config}")
+    logger.info(f"Best value: {best_value}")
+    save_json(join(save_path, f"{run_id}_search_results.json"), search_results)
+
+    return best_metrics, search_results
+
+
 def search_parameters():
     logging.basicConfig(level=logging.INFO)
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_rounds", type=int, default=100)
+    parser.add_argument("--n_processes", type=int, default=1)
     parser.add_argument("--best_key", type=str, required=True)
     parser.add_argument("--save_path", type=str, default="hyperparam_search_results")
     parser.add_argument("--hyperparams_path", type=str, required=True)
@@ -96,37 +135,8 @@ def search_parameters():
     os.makedirs(save_path, exist_ok=True)
 
     tuner = RandomSearchTuner(hyperparams, n_rounds)
-    search_results = []
 
-    best_value = float("-inf")
-    best_config = None
-    best_metrics = None
-
-    for config_id, config in enumerate(tuner.get_configurations()):
-        logger.info(f"Evaluating config #{config_id}: {config}")
-        new_args = deepcopy(namespace)
-
-        for attr_name, value in config.items():
-            setattr(new_args, attr_name, value)
-
-        model, device = get_model_from_args(new_args)
-        metrics = training(new_args, model, device)
-
-        cur_val = np.mean(metrics[best_key])
-        best_metrics = {"config": config, "key": best_key, "value": cur_val, "metrics": metrics}
-        search_results.append(best_metrics)
-
-        if cur_val > best_value:
-            best_value = cur_val
-            best_config = config
-            best_metrics = {"config": config, "key": best_key, "value": best_value, "metrics": metrics}
-            if best_metrics is not None:
-                save_json(join(save_path, f"{run_id}_best_metrics.json"), best_metrics)
-
-    logger.info(f"Best config: {best_config}")
-    logger.info(f"Best value: {best_value}")
-    save_json(join(save_path, f"{run_id}_search_results.json"), search_results)
-    print("")
+    evaluate_configs(namespace, tuner.get_configurations(), best_key, run_id, save_path)
 
 
 if __name__ == "__main__":
