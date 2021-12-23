@@ -80,7 +80,13 @@ def evaluate_configs(namespace, configs, best_key, run_id, save_path, trainer_id
             setattr(new_args, attr_name, value)
 
         model, device = get_model_from_args(new_args)
-        metrics = training(new_args, model, device, trainer_id=trainer_id)
+
+        try:
+            metrics = training(new_args, model, device, trainer_id=trainer_id)
+        except Exception as e:
+            logger.exception("Encountered unexpected error turning training.")
+            logger.warning("Continuing to next configuration.")
+            continue
 
         cur_val = np.mean(metrics[best_key])
         best_metrics = {"config": config, "key": best_key, "value": cur_val, "metrics": metrics}
