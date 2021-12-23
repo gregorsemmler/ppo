@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import queue
 from argparse import SUPPRESS
 from copy import deepcopy
 from datetime import datetime
@@ -8,10 +9,10 @@ from os.path import join
 from types import SimpleNamespace
 
 import numpy as np
+import torch.multiprocessing as mp
 
 from common import load_json, save_json
 from train import TRAIN_ARG_PARSER, training, get_model_from_args
-
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class RandomSearchTuner(object):
                 yield {k: v() if callable(v) else v for k, v in self.hyperparams.items()}
 
 
-def evaluate_configs(namespace, configs, best_key, run_id, save_path):
+def evaluate_configs(namespace, configs, best_key, run_id, save_path, trainer_id=0):
     search_results = []
 
     best_value = float("-inf")
@@ -72,14 +73,14 @@ def evaluate_configs(namespace, configs, best_key, run_id, save_path):
 
     config_id = 0
     for config in configs:
-        logger.info(f"Evaluating config #{config_id}: {config}")
+        logger.info(f"{trainer_id}# Evaluating config #{config_id}: {config}")
         new_args = deepcopy(namespace)
 
         for attr_name, value in config.items():
             setattr(new_args, attr_name, value)
 
         model, device = get_model_from_args(new_args)
-        metrics = training(new_args, model, device)
+        metrics = training(new_args, model, device, trainer_id=trainer_id)
 
         cur_val = np.mean(metrics[best_key])
         best_metrics = {"config": config, "key": best_key, "value": cur_val, "metrics": metrics}
@@ -112,6 +113,8 @@ def search_parameters():
     parser.add_argument("--hyperparams_path", type=str, required=True)
     parser.add_argument("--run_id", default=None)
     search_args = parser.parse_args()
+
+    n_processes = search_args.n_processes
     n_rounds = search_args.n_rounds
     best_key = search_args.best_key
     run_id = search_args.run_id if search_args.run_id is not None else f"run_{datetime.now():%d%m%Y_%H%M%S}"
@@ -136,7 +139,63 @@ def search_parameters():
 
     tuner = RandomSearchTuner(hyperparams, n_rounds)
 
-    evaluate_configs(namespace, tuner.get_configurations(), best_key, run_id, save_path)
+    if n_processes == 1:
+        evaluate_configs(namespace, tuner.get_configurations(), best_key, run_id, save_path)
+    else:
+        processes = []
+        input_queue = mp.Queue()
+        return_queue = mp.Queue()
+
+        for c in tuner.get_configurations():
+            input_queue.put(c)
+
+        for proc_idx in range(n_processes):
+            p = mp.Process(target=multiprocess_wrapper,
+                           args=(proc_idx, namespace, best_key, run_id, save_path, input_queue, return_queue))
+            p.start()
+            processes.append(p)
+        for p in processes:
+            p.join()
+
+        best_overall_metrics = None
+        best_overall_value = float("-inf")
+        overall_search_results = []
+        while return_queue.qsize():
+            proc_best_metrics, proc_search_results = return_queue.get()
+            proc_best_val = proc_best_metrics["value"]
+            if proc_best_val > best_overall_value:
+                best_overall_value = proc_best_val
+                best_overall_metrics = proc_best_metrics
+
+            overall_search_results.extend(proc_search_results)
+
+        logger.info(f"Best overall config: {best_overall_metrics['config']}")
+        logger.info(f"Best overall value: {best_overall_value}")
+
+        overall_bm_save_path = join(save_path, f"{run_id}_best_metrics.json")
+        overall_sr_save_path = join(save_path, f"{run_id}_search_results.json")
+        save_json(overall_bm_save_path, best_overall_metrics)
+        save_json(overall_sr_save_path, overall_search_results)
+
+        logger.info(f"Saved overall best metrics to '{overall_bm_save_path}'")
+        logger.info(f"Saved overall search results to '{overall_sr_save_path}'")
+
+
+def get_multiprocess_configs(input_queue: mp.Queue, timeout=0.01):
+    while True:
+        try:
+            config = input_queue.get(timeout=timeout)
+            yield config
+        except queue.Empty:
+            break
+
+
+def multiprocess_wrapper(process_idx, namespace, best_key, run_id, save_path, input_queue: mp.Queue,
+                         return_queue: mp.Queue):
+    proc_run_id = f"{run_id}_{process_idx}"
+    return_queue.put(
+        evaluate_configs(namespace, get_multiprocess_configs(input_queue), best_key, proc_run_id, save_path,
+                         trainer_id=process_idx))
 
 
 if __name__ == "__main__":
