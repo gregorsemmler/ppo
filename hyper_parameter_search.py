@@ -161,7 +161,8 @@ def search_parameters():
         best_overall_value = float("-inf")
         overall_search_results = []
         while return_queue.qsize():
-            proc_best_metrics, proc_search_results = return_queue.get()
+            proc_ret = return_queue.get()
+            proc_best_metrics, proc_search_results = proc_ret
             proc_best_val = proc_best_metrics["value"]
             if proc_best_val > best_overall_value:
                 best_overall_value = proc_best_val
@@ -169,16 +170,17 @@ def search_parameters():
 
             overall_search_results.extend(proc_search_results)
 
-        logger.info(f"Best overall config: {best_overall_metrics['config']}")
-        logger.info(f"Best overall value: {best_overall_value}")
+        if best_overall_metrics is not None:
+            logger.info(f"Best overall config: {best_overall_metrics['config']}")
+            logger.info(f"Best overall value: {best_overall_value}")
 
-        overall_bm_save_path = join(save_path, f"{run_id}_best_metrics.json")
-        overall_sr_save_path = join(save_path, f"{run_id}_search_results.json")
-        save_json(overall_bm_save_path, best_overall_metrics)
-        save_json(overall_sr_save_path, overall_search_results)
+            overall_bm_save_path = join(save_path, f"{run_id}_best_metrics.json")
+            overall_sr_save_path = join(save_path, f"{run_id}_search_results.json")
+            save_json(overall_bm_save_path, best_overall_metrics)
+            save_json(overall_sr_save_path, overall_search_results)
 
-        logger.info(f"Saved overall best metrics to '{overall_bm_save_path}'")
-        logger.info(f"Saved overall search results to '{overall_sr_save_path}'")
+            logger.info(f"Saved overall best metrics to '{overall_bm_save_path}'")
+            logger.info(f"Saved overall search results to '{overall_sr_save_path}'")
 
 
 def get_multiprocess_configs(input_queue: mp.Queue, timeout=0.01):
