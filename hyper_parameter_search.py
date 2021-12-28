@@ -12,7 +12,8 @@ import numpy as np
 import torch.multiprocessing as mp
 
 from common import load_json, save_json
-from train import TRAIN_ARG_PARSER, training, get_model_from_args
+from train import TRAIN_ARG_PARSER, training
+from model import get_model_from_args
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ def evaluate_configs(namespace, configs, best_key, run_id, save_path, trainer_id
 
         try:
             metrics = training(new_args, model, device, trainer_id=trainer_id)
+
         except Exception as e:
             logger.exception("Encountered unexpected error turning training.")
             logger.warning("Continuing to next configuration.")
@@ -211,6 +213,7 @@ def multiprocess_wrapper(process_idx, namespace, best_key, run_id, save_path, in
     return_queue.put(
         evaluate_configs(namespace, get_multiprocess_configs(input_queue), best_key, proc_run_id, save_path,
                          trainer_id=process_idx))
+    logger.info(f"Process {process_idx} finished.")
 
 
 if __name__ == "__main__":

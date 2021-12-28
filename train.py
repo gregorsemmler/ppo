@@ -16,9 +16,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 from data import EnvironmentsDataset, Policy, PPOBatch
-from model import ActorCriticModel, get_model, get_preprocessor
+from model import ActorCriticModel, get_preprocessor, get_model_from_args
 from play import play_environment
-from common import save_checkpoint, load_checkpoint, GracefulExit, get_action_space_details, get_environment
+from common import save_checkpoint, GracefulExit, get_action_space_details, get_environment
 
 logger = logging.getLogger(__name__)
 
@@ -422,6 +422,14 @@ class PPOTrainer(object):
         return total_loss, p_loss, v_loss, e_loss
 
 
+def parse_list(s):
+    return [int(e) for e in s.split(",")]
+
+
+def parse_list_of_lists(s):
+    return [[int(el) for el in lst.split(",")] for lst in s.split(";")]
+
+
 TRAIN_ARG_PARSER = argparse.ArgumentParser()
 TRAIN_ARG_PARSER.add_argument("--n_processes", type=int, default=1)
 TRAIN_ARG_PARSER.add_argument("--n_envs", type=int, default=1)
@@ -433,7 +441,12 @@ TRAIN_ARG_PARSER.add_argument("--ppo_clip_ratio", type=float, default=0.2)
 TRAIN_ARG_PARSER.add_argument("--batch_size", type=int, default=128)
 TRAIN_ARG_PARSER.add_argument("--lr", type=float, default=1e-3)
 TRAIN_ARG_PARSER.add_argument("--critic_lr", type=float, default=1e-3)
-TRAIN_ARG_PARSER.add_argument("--scheduler_returns", type=lambda s: [int(e) for e in s.split(",")])
+TRAIN_ARG_PARSER.add_argument("--scheduler_returns", type=parse_list)
+TRAIN_ARG_PARSER.add_argument("--shared_params", type=parse_list)
+TRAIN_ARG_PARSER.add_argument("--conv_params", type=parse_list_of_lists)
+TRAIN_ARG_PARSER.add_argument("--head_params", type=parse_list)
+TRAIN_ARG_PARSER.add_argument("--fully_params", type=parse_list)
+TRAIN_ARG_PARSER.add_argument("--activation")
 TRAIN_ARG_PARSER.add_argument("--scheduler_factor", type=float, default=0.1)
 TRAIN_ARG_PARSER.add_argument("--eps", type=float, default=1e-3)
 TRAIN_ARG_PARSER.add_argument("--l2_regularization", type=float, default=0)
@@ -473,28 +486,6 @@ TRAIN_ARG_PARSER.add_argument("--save_optimizer", dest="save_optimizer", action=
 TRAIN_ARG_PARSER.add_argument("--no_save_optimizer", dest="save_optimizer", action="store_false")
 TRAIN_ARG_PARSER.set_defaults(atari=False, graceful_exit=True, undiscounted_log=True, shared_model=False,
                               tensorboardlog=False, fixed_std=True, save_best_eval=True, save_optimizer=False)
-
-
-def get_model_from_args(args):
-    env_name = args.env_name
-    atari = args.atari
-    shared_model = args.shared_model
-    pretrained_path = args.pretrained_path
-
-    if args.device_token is None:
-        device_token = "cuda" if torch.cuda.is_available() else "cpu"
-    else:
-        device_token = args.device_token
-
-    device = torch.device(device_token)
-
-    model = get_model(env_name, shared_model, atari, device, fixed_std=args.fixed_std)
-
-    if pretrained_path is not None:
-        load_checkpoint(pretrained_path, model, device=device)
-        logger.info(f"Loaded model from '{pretrained_path}'")
-
-    return model, device
 
 
 def main():

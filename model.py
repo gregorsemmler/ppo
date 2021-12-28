@@ -1,3 +1,4 @@
+import logging
 import math
 
 import gym
@@ -8,8 +9,10 @@ from torch import nn
 from torch.distributions import Categorical, Normal
 
 from atari_wrappers import LazyFrames, wrap_deepmind, make_atari
-from common import clip_mean_std, get_action_space_details
+from common import clip_mean_std, get_action_space_details, load_checkpoint
 from envs import SimpleCorridorEnv
+
+logger = logging.getLogger(__name__)
 
 
 def get_output_shape(layer, shape):
@@ -142,9 +145,15 @@ class ActorCriticModel(nn.Module):
 
 class MLPModel(ActorCriticModel):
 
-    def __init__(self, input_size, action_dimension, discrete=True, fully_params=(64, 64), activation="relu",
+    def __init__(self, input_size, action_dimension, discrete=True, fully_params=None, activation=None,
                  fixed_std=False):
         super().__init__()
+
+        if fully_params is None:
+            fully_params = [64, 64]
+        if activation is None:
+            activation = "relu"
+
         self.action_dim = action_dimension
         self.input_size = input_size
         self.activation = activation
@@ -155,6 +164,7 @@ class MLPModel(ActorCriticModel):
         value_layers = []
 
         prev_full_n = self.input_size
+
         for full_n in fully_params:
             policy_layers.append(nn.Linear(prev_full_n, full_n))
             policy_layers.append(self.get_activation())
@@ -216,9 +226,17 @@ class MLPModel(ActorCriticModel):
 
 class SharedMLPModel(ActorCriticModel):
 
-    def __init__(self, input_size, action_dimension, discrete=True, shared_params=(64, 64), head_params=(32,),
-                 activation="elu", fixed_std=False):
+    def __init__(self, input_size, action_dimension, discrete=True, shared_params=None, head_params=None,
+                 activation=None, fixed_std=False):
         super().__init__()
+
+        if shared_params is None:
+            shared_params = [64, 64]
+        if head_params is None:
+            head_params = [32]
+        if activation is None:
+            activation = "elu"
+
         self.action_dim = action_dimension
         self.input_size = input_size
         self.activation = activation
@@ -294,19 +312,26 @@ class SharedMLPModel(ActorCriticModel):
 
 class CNNModel(ActorCriticModel):
 
-    def __init__(self, input_shape, action_dimension, discrete=True, conv_params=((16, 8, 4, 0), (32, 4, 2, 0)),
-                 fully_params=(256,), fixed_std=False):
+    def __init__(self, input_shape, action_dimension, discrete=True, conv_params=None, fully_params=None,
+                 fixed_std=False, activation="relu"):
         super().__init__()
+
+        if conv_params is None:
+            conv_params = [[16, 8, 4, 0], [32, 4, 2, 0]]
+        if fully_params is None:
+            fully_params = [256]
+
         self.input_shapes = input_shape
         self.action_dim = action_dimension
         self.discrete = discrete
         self.fixed_std = fixed_std
+        self.activation = activation
 
         prev_n_filters = self.input_shapes[0]
         conv_layers = []
         for (n_filters, k_size, stride, padding) in conv_params:
             conv_layers.append(nn.Conv2d(prev_n_filters, n_filters, kernel_size=k_size, stride=stride, padding=padding))
-            conv_layers.append(nn.ReLU(inplace=True))
+            conv_layers.append(self.get_activation())
             prev_n_filters = n_filters
 
         self.conv = nn.Sequential(*conv_layers)
@@ -316,9 +341,9 @@ class CNNModel(ActorCriticModel):
         value_layers = [nn.Flatten()]
         for full_n in fully_params:
             policy_head_layers.append(nn.Linear(prev_full_n, full_n))
-            policy_head_layers.append(nn.ReLU(inplace=True))
+            policy_head_layers.append(self.get_activation())
             value_layers.append(nn.Linear(prev_full_n, full_n))
-            value_layers.append(nn.ReLU(inplace=True))
+            value_layers.append(self.get_activation())
             prev_full_n = full_n
 
         value_layers.append(nn.Linear(prev_full_n, 1))
@@ -333,6 +358,13 @@ class CNNModel(ActorCriticModel):
         else:
             self.policy_log_std = None
         self.value_head = nn.Sequential(*value_layers)
+
+    def get_activation(self):
+        if self.activation == "relu":
+            return nn.ReLU(inplace=True)
+        elif self.activation == "elu":
+            return nn.ELU(inplace=True)
+        raise ValueError(f"Unknown Activation {self.activation}")
 
     def forward(self, x):
         conv_out = self.conv(x)
@@ -476,15 +508,15 @@ class ResidualModel(ActorCriticModel):
         return (self.policy_mean(p_shared_out), self.policy_log_std), self.val_head(tower_out)
 
 
-def get_model(env_name, shared_model, atari, device, fixed_std=True):
+def get_model(env_name, shared_model, atari, device, **kwargs):
     if env_name == "SimpleCorridorEnv":
         eval_env = SimpleCorridorEnv()
         state = eval_env.reset()
         in_states = state.shape[0]
         discrete, action_dim, limits = get_action_space_details(eval_env.action_space)
         if shared_model:
-            return SharedMLPModel(in_states, action_dim, fixed_std=fixed_std, discrete=discrete).to(device)
-        return MLPModel(in_states, action_dim, fixed_std=fixed_std, discrete=discrete).to(device)
+            return SharedMLPModel(in_states, action_dim, discrete=discrete, **kwargs).to(device)
+        return MLPModel(in_states, action_dim, discrete=discrete, **kwargs).to(device)
     elif atari:
         eval_env = wrap_deepmind(make_atari(env_name))
         state = eval_env.reset()
@@ -493,15 +525,15 @@ def get_model(env_name, shared_model, atari, device, fixed_std=True):
         in_t = preprocessor.preprocess(state)
         discrete, action_dim, limits = get_action_space_details(eval_env.action_space)
         input_shape = tuple(in_t.shape)[1:]
-        return CNNModel(input_shape, action_dim, discrete=discrete, fixed_std=fixed_std).to(device)
+        return CNNModel(input_shape, action_dim, discrete=discrete, **kwargs).to(device)
 
     eval_env = gym.make(env_name)
     state = eval_env.reset()
     in_states = state.shape[0]
     discrete, action_dim, limits = get_action_space_details(eval_env.action_space)
     if shared_model:
-        return SharedMLPModel(in_states, action_dim, fixed_std=fixed_std, discrete=discrete).to(device)
-    return MLPModel(in_states, action_dim, fixed_std=fixed_std, discrete=discrete).to(device)
+        return SharedMLPModel(in_states, action_dim, discrete=discrete, **kwargs).to(device)
+    return MLPModel(in_states, action_dim, discrete=discrete, **kwargs).to(device)
 
 
 def get_preprocessor(env_name, atari):
@@ -510,3 +542,32 @@ def get_preprocessor(env_name, atari):
     elif atari:
         return SimpleCNNPreProcessor()
     return NoopPreProcessor()
+
+
+def get_model_from_args(args):
+    env_name = args.env_name
+    atari = args.atari
+    shared_model = args.shared_model
+    pretrained_path = args.pretrained_path
+
+    if args.device_token is None:
+        device_token = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        device_token = args.device_token
+
+    device = torch.device(device_token)
+
+    kw_model_arg_names = ["fixed_std", "shared_params", "head_params", "conv_params", "fully_params", "activation"]
+    kwargs = {k: getattr(args, k, None) for k in kw_model_arg_names}
+
+    for k, v in list(kwargs.items()):
+        if v is None:
+            del kwargs[k]
+
+    model = get_model(env_name, shared_model, atari, device, **kwargs)
+
+    if pretrained_path is not None:
+        load_checkpoint(pretrained_path, model, device=device)
+        logger.info(f"Loaded model from '{pretrained_path}'")
+
+    return model, device

@@ -10,7 +10,7 @@ from gym.wrappers import Monitor
 
 from common import load_checkpoint, get_environment
 from data import Policy, EpisodeResult
-from model import get_model, get_preprocessor
+from model import get_preprocessor, get_model_from_args
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,6 @@ def evaluate_model():
 
     env_name = args.env_name
     atari = args.atari
-    shared_model = args.shared_model
     model_path = args.model_path
     gamma = args.gamma
     render = args.render
@@ -94,14 +93,7 @@ def evaluate_model():
     num_episodes = args.n_episodes
     run_id = args.run_id
 
-    if args.device_token is None:
-        device_token = "cuda" if torch.cuda.is_available() else "cpu"
-    else:
-        device_token = args.device_token
-
-    device = torch.device(device_token)
-
-    model = get_model(env_name, shared_model, atari, device, fixed_std=args.fixed_std)
+    model, device = get_model_from_args(args)
     preprocessor = get_preprocessor(env_name, atari)
     env = get_environment(env_name, atari)
 
