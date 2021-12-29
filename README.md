@@ -2,14 +2,14 @@
 
 A clean and modular implementation of Proximal Policy Optimization as described in [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347) written in PyTorch. 
 
-Implemented and tested with PyTorch 1.9.0, Gym 0.15.4, Roboschool 1.0.48, PyBullet 3.2.0 and OpenCV 4.5.4.58 on Ubuntu 20.04.
+Implemented and tested in Python 3.8 with PyTorch 1.9.0, Gym 0.15.4, Roboschool 1.0.48, PyBullet 3.2.0, Numpy 1.21.3, and OpenCV 4.5.4.58 on Ubuntu 20.04.
 
 * `atari_wrappers.py` contains wrappers for gym atari environments.
 * `common.py` contains some common functionality.
 * `data.py` contains code for the dataset.
 * `envs.py` contains a simple test environment.
 * `model.py` contains multiple model definitions.
-* `play.py` allows testing and visualizing previously trained models.
+* `play.py` allows testing and visualizing environments based on previously trained models.
 * `train.py` contains the main training code with the opportunity to customize hyperparameters, the environment being trained, the model and the ability to save and load models.
 * `hyper_parameter_search.py` contains code to perform multiple training runs and evaluate which hyperparameters perform the best based on a defined metric. 
 
