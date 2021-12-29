@@ -18,7 +18,8 @@ from torch.utils.tensorboard import SummaryWriter
 from data import EnvironmentsDataset, Policy, PPOBatch
 from model import ActorCriticModel, get_preprocessor, get_model_from_args
 from play import play_environment
-from common import save_checkpoint, GracefulExit, get_action_space_details, get_environment
+from common import save_checkpoint, GracefulExit, get_action_space_details, get_environment, parse_list, \
+    parse_list_of_lists
 
 logger = logging.getLogger(__name__)
 
@@ -420,14 +421,6 @@ class PPOTrainer(object):
         total_loss = p_loss + v_loss + e_loss
 
         return total_loss, p_loss, v_loss, e_loss
-
-
-def parse_list(s):
-    return [int(e) for e in s.split(",")]
-
-
-def parse_list_of_lists(s):
-    return [[int(el) for el in lst.split(",")] for lst in s.split(";")]
 
 
 TRAIN_ARG_PARSER = argparse.ArgumentParser()

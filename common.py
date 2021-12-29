@@ -92,3 +92,11 @@ class GracefulExit(object):
     def exit_gracefully(self, *args):
         logger.info("Termination Signal received. Exiting gracefully")
         self.run = False
+
+
+def parse_list(s):
+    return [int(e) for e in s.split(",")]
+
+
+def parse_list_of_lists(s):
+    return [[int(el) for el in lst.split(",")] for lst in s.split(";")]

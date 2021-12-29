@@ -5,10 +5,9 @@ from datetime import datetime
 from os.path import join
 
 import roboschool
-import torch
 from gym.wrappers import Monitor
 
-from common import load_checkpoint, get_environment
+from common import load_checkpoint, get_environment, parse_list, parse_list_of_lists
 from data import Policy, EpisodeResult
 from model import get_preprocessor, get_model_from_args
 
@@ -81,23 +80,26 @@ def evaluate_model():
     parser.add_argument("--no_fixed_std", dest="fixed_std", action="store_false")
     parser.add_argument("--render", dest="render", action="store_true")
     parser.add_argument("--no_render", dest="render", action="store_false")
+    parser.add_argument("--shared_params", type=parse_list)
+    parser.add_argument("--conv_params", type=parse_list_of_lists)
+    parser.add_argument("--head_params", type=parse_list)
+    parser.add_argument("--fully_params", type=parse_list)
+    parser.add_argument("--activation")
     parser.set_defaults(atari=False, shared_model=False, fixed_std=False, render=True)
     args = parser.parse_args()
 
     env_name = args.env_name
     atari = args.atari
-    model_path = args.model_path
     gamma = args.gamma
     render = args.render
     video_path = args.video_path
     num_episodes = args.n_episodes
     run_id = args.run_id
+    setattr(args, "pretrained_path", getattr(args, "model_path"))
 
     model, device = get_model_from_args(args)
     preprocessor = get_preprocessor(env_name, atari)
     env = get_environment(env_name, atari)
-
-    load_checkpoint(model_path, model, device=device)
 
     policy = Policy(model, preprocessor, device)
 
